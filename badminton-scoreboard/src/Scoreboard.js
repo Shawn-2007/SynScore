@@ -21,7 +21,7 @@ function Scoreboard() {
         const reconnectInterval = 2000; // 每 2 秒重試一次
 
         const connectWebSocket = () => {
-            ws = new WebSocket(`ws://localhost:3001?room=${roomKey}`);
+            ws = new WebSocket(`ws://api.shawn4x4.com:3001?room=${roomKey}`);
 
             ws.onopen = () => {
                 console.log(`Connected to WebSocket server (Room: ${roomKey})`);
@@ -91,7 +91,7 @@ function Scoreboard() {
                 gameScoreB: newGameScoreB,
             });
             try {
-                const response = await fetch('http://localhost:3001/api/update-score', {
+                const response = await fetch('http://api.shawn4x4.com:3001/api/update-score', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
