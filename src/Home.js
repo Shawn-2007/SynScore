@@ -22,7 +22,7 @@ function Home() {
     };
 
     const handleCreateRoom = async () => {
-        const response = await fetch('http://api.shawn4x4.com:3001/api/create-room', {
+        const response = await fetch('http://ec.shawn4x4.com:3001/api/create-room', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
