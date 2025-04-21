@@ -1,6 +1,6 @@
 {
   "name": "badminton-scoreboard",
-  "homepage": "https://shawn-2007.github.io/SynScore/",
+  "homepage": "/SynScore",
   "version": "0.1.0",
   "private": true,
   "dependencies": {
