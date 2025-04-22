@@ -4,7 +4,8 @@ import './Scoreboard.css';
 
 // 後端地址
 // const BACKEND_URL = 'nas.shawn4x4.com:3001';
-const BACKEND_URL = 'ec.shawn4x4.com:3001';
+// const BACKEND_URL = 'ec.shawn4x4.com:3001';
+const BACKEND_URL = 'api.shawn4x4.com';
 
 function Scoreboard() {
     const [teamAScore, setTeamAScore] = useState(0); // A組分數
@@ -100,7 +101,9 @@ function Scoreboard() {
 
         // 連接WebSocket
         const connectWebSocket = () => {
-            ws = new WebSocket(`ws://${BACKEND_URL}?room=${roomKey}`);
+            // ws = new WebSocket(`ws://${BACKEND_URL}?room=${roomKey}`);
+            // ws = new WebSocket(`ws://ec.shawn4x4.com:3001?room=${roomKey}`);
+            ws = new WebSocket(`wss://api.shawn4x4.com/ws/?room=${roomKey}`);
 
             ws.onopen = () => {
                 // console.log(`Connected to WebSocket server (Room: ${roomKey})`);
@@ -162,7 +165,7 @@ function Scoreboard() {
         // 取得房間狀態
         const fetchRoomState = async () => {
             try {
-                const response = await fetch(`http://${BACKEND_URL}/api/room-state?room=${roomKey}`);
+                const response = await fetch(`https://${BACKEND_URL}/nodeApi/api/room-state?room=${roomKey}`);
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -225,7 +228,7 @@ function Scoreboard() {
 
         if (mode === 'online' && roomKey) {
             try {
-                await fetch(`http://${BACKEND_URL}/api/update-first-serve`, {
+                await fetch(`https://${BACKEND_URL}/nodeApi/api/update-first-serve`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -247,7 +250,7 @@ function Scoreboard() {
     const updateGameStarted = async (isStarted) => {
         if (mode === 'online' && roomKey) {
             try {
-                await fetch(`http://${BACKEND_URL}/api/update-game-started`, {
+                await fetch(`https://${BACKEND_URL}/nodeApi/api/update-game-started`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -290,7 +293,7 @@ function Scoreboard() {
 
         if (mode === 'online' && roomKey) {
             try {
-                const response = await fetch(`http://${BACKEND_URL}/api/update-score`, {
+                const response = await fetch(`https://${BACKEND_URL}/nodeApi/api/update-score`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -403,7 +406,7 @@ function Scoreboard() {
 
         if (mode === 'online' && roomKey) {
             try {
-                const response = await fetch(`http://${BACKEND_URL}/api/update-score`, {
+                const response = await fetch(`https://${BACKEND_URL}/nodeApi/api/update-score`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -431,7 +434,7 @@ function Scoreboard() {
     const resetScores = async () => {
         if (mode === 'online' && roomKey) {
             try {
-                const response = await fetch(`http://${BACKEND_URL}/api/update-score`, {
+                const response = await fetch(`https://${BACKEND_URL}/nodeApi/api/update-score`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -474,7 +477,7 @@ function Scoreboard() {
 
         if (mode === 'online' && roomKey) {
             try {
-                const response = await fetch(`http://${BACKEND_URL}/api/update-swap`, {
+                const response = await fetch(`https://${BACKEND_URL}/nodeApi/api/update-swap`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -516,7 +519,7 @@ function Scoreboard() {
     const handleCreateRoom = async () => {
         try {
             console.log('Attempting to create room...');
-            const response = await fetch(`http://${BACKEND_URL}/api/create-room`, {
+            const response = await fetch(`https://${BACKEND_URL}/nodeApi/api/create-room`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -552,7 +555,7 @@ function Scoreboard() {
 
         try {
             console.log('Attempting to join room:', joinRoomKey);
-            const response = await fetch(`http://${BACKEND_URL}/api/room-state?room=${joinRoomKey}`);
+            const response = await fetch(`https://${BACKEND_URL}/nodeApi/api/room-state?room=${joinRoomKey}`);
             if (!response.ok) {
                 throw new Error(`Room does not exist or inaccessible: ${response.status}`);
             }
