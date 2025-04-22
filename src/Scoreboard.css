@@ -77,12 +77,14 @@ body {
     font-size: 1.5em;
     color: white;
     margin: 0;
+    margin-top: -20px;
 }
 
 .team p.score-text {
     font-weight: bold;
     color: white;
     margin: 0;
+    margin-top: -60px;
 }
 
 .score-small {
@@ -254,7 +256,8 @@ button:disabled {
     height: 100%;
     background: #fff;
     display: flex;
-    justify-content: center;
+    /* justify-content: center; */
+    flex-direction: column;
     align-items: center;
     z-index: 20;
 }
@@ -325,6 +328,7 @@ button:disabled {
     animation: fadeIn 0.5s ease-in;
 }
 
+/* 彈出動畫 */
 @keyframes fadeIn {
     from {
         opacity: 0;
@@ -363,26 +367,27 @@ button:disabled {
 
 /* WIN文字 */
 .crown-label {
-    font-size: 0.3em;
+    /* font-size: 0.3em; */
     position: absolute;
-    width: 1em;
-    height: 1em;
     background: transparent;
     z-index: 1;
+    top: -400px;
+    right: 70px;
+    transform: scale(3) rotate(25deg);
+    /* 以中心點縮放 */
+    transform-origin: center;
 }
 
 .team-a-crown {
-    top: 0.2em;
-    right: 0.1em;
+    /* top: -0.68em;
+    right: 0.1em; */
     color: #ffd700;
-    transform: rotate(20deg);
 }
 
 .team-b-crown {
-    top: 0.2em;
-    right: 0.1em;
+    /* top: -0.68em;
+    right: 0.1em; */
     color: #ffd700;
-    transform: rotate(25deg);
 }
 
 .play-again-text {
@@ -449,25 +454,27 @@ button:disabled {
 }
 
 .consecutive-serve {
+    /* font-size: 5em; */
+    /* color: white; */
+    /* padding: 5px 10px; */
+    /* border-radius: 5px; */
+    /* left: 50%; */
+    /* display: none; */
     position: absolute;
-    bottom: 10px;
-    left: 50%;
+    bottom: 0px;
     transform: translateX(-50%);
-    font-size: 1.2em;
-    color: white;
-    padding: 5px 10px;
-    border-radius: 5px;
-    display: none;
-    animation: blink 1s infinite;
+    animation: blink 2s infinite;
+
+    background-image: url('/public/images/common/main_consecutive_serve_light.png');
+    width: 120px;
+    height: 120px;
+    background-size: cover;
+    background-repeat: no-repeat;
+    z-index: 15;
+
 }
 
-.team-a-serve.consecutive-serve {
-    background: rgba(255, 77, 77, 0.7);
-}
 
-.team-b-serve.consecutive-serve {
-    background: rgba(77, 121, 255, 0.7);
-}
 
 @keyframes blink {
 
@@ -514,18 +521,46 @@ button:disabled {
     }
 }
 
-@media (max-width: 768px) {
+/* IPHONE直立式 orientation方向: portrait縱向*/
+@media (max-width: 768px) and (orientation: portrait) {
+    .scoreboard {
+        flex-direction: column;
+        align-items: center;
+    }
+
     .scoreboard-title {
         font-size: 1.5em;
-        top: 50px;
+        /* top: 50px; */
+    }
+
+    /* WIN文字 */
+    .crown-label {
+        transform: scale(1.5) rotate(20deg);
+        /* 以中心點縮放 */
+        transform-origin: center;
+        top: -150px;
+        right: 85px;
+    }
+
+    .team {
+        /* max-width: 50%; */
+        margin-top: -10px;
+        padding: 0px;
+        padding-inline: 25%;
+        width: 300px;
+        min-height: 50px;
     }
 
     .team h2 {
         font-size: 1.2em;
+        /* padding-top: 50px; */
+        margin-top: -20px;
+
     }
 
     .team p.score-text {
-        font-size: 3em;
+        margin-top: -30px;
+        font-size: 16em;
     }
 
     .score-small {
@@ -546,8 +581,11 @@ button:disabled {
     }
 
     .consecutive-serve {
-        font-size: 1em;
-        padding: 4px 8px;
+        /* font-size: 2em; */
+        /* padding: 4px 8px; */
+        padding: 12px 12px;
+        width: 50px;
+        height: 50px;
     }
 
     .settings-panel {
@@ -568,7 +606,9 @@ button:disabled {
     }
 
     .final-score-container {
-        font-size: 1.2em;
+        padding-top: 0px;
+        font-size: 12em;
+        margin-top: -20px;
     }
 
     .play-again-text {
@@ -581,104 +621,45 @@ button:disabled {
     }
 }
 
-@media (max-width: 380px) and (orientation: portrait) {
-    .scoreboard {
-        flex-direction: column;
-        align-items: center;
-    }
 
-    .team {
-        max-width: 100%;
-    }
-
-    .bottomButtons {
-        flex-direction: column;
-    }
-
-    .team p.score-text {
-        font-size: 2em;
-    }
-
-    .score-small {
-        font-size: 1.5em;
-    }
-
-    .score-medium {
-        font-size: 2em;
-    }
-
-    .score-large {
-        font-size: 2.5em;
-    }
-
-    button {
-        width: 100%;
-        max-width: 200px;
-        margin: 5px auto;
-    }
-
-    .consecutive-serve {
-        font-size: 0.9em;
-        padding: 3px 6px;
-        bottom: 5px;
-    }
-
-    .settings-panel {
-        width: 95%;
-        height: 95%;
-    }
-
-    .settings-options button {
-        width: 120px;
-    }
-
-    .join-room input {
-        width: 120px;
-    }
-
-    .font-size-options button {
-        width: 60px;
-    }
-
-    .final-score-container {
-        font-size: 1em;
-    }
-
-    .play-again-text {
-        font-size: 0.9em;
-    }
-
-    .select-serve h2 {
-        font-size: 1.2em;
-    }
-
-    .serve-button {
-        padding: 10px 20px;
-        font-size: 1em;
-    }
-
-    .back-panel {
-        width: 100%;
-        height: 100%;
-    }
-}
-
+/* IPHOME橫躺 orientation方向: portrait橫向*/
 @media (max-height: 580px) and (orientation: landscape) {
     .scoreboard {
         align-items: center;
     }
 
+    /* WIN文字 */
+    .crown-label {
+        transform: scale(1.5) rotate(20deg);
+        /* 以中心點縮放 */
+        transform-origin: center;
+        top: -150px;
+        right: 85px;
+    }
+
+    /* 計分背板 */
     .team {
         max-width: 60%;
         max-height: 70%;
+        height: 50px;
+    }
+
+    .team h2 {
+        font-size: 1em;
+        /* margin: 0; */
+        margin-top: -10px;
+
     }
 
     .bottomButtons {
         flex-direction: row;
     }
 
+    /* 計分數字 */
     .team p.score-text {
-        font-size: 10em;
+        font-size: 12em;
+        margin-top: -30px;
+
     }
 
     .score-small {
@@ -699,10 +680,14 @@ button:disabled {
         margin: 5px;
     }
 
+    .serve-buttons {
+        margin-top: -25px;
+    }
+
+    /* 連發圖 */
     .consecutive-serve {
-        font-size: 0.9em;
-        padding: 3px 6px;
-        bottom: 5px;
+        height: 60px;
+        width: 60px;
     }
 
     .settings-panel {
@@ -723,11 +708,20 @@ button:disabled {
     }
 
     .final-score-container {
-        font-size: 1.2em;
+        padding-top: 0px;
+        font-size: 12em;
+        margin-top: -20px;
     }
 
     .play-again-text {
         font-size: 1em;
+        margin-top: -45px;
+    }
+
+    .serve-choose-text {
+        font-size: 1em;
+        margin-top: -15px;
+
     }
 
     .back-panel {

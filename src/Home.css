@@ -27,7 +27,6 @@
     background-color: #45a049;
 }
 
-.options,
 .online-options {
     display: flex;
     flex-direction: column;

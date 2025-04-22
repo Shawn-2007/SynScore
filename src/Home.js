@@ -3,22 +3,16 @@ import { useNavigate } from 'react-router-dom';
 import './Home.css';
 
 function Home() {
-    const [showOptions, setShowOptions] = useState(false);
     const [showOnlineOptions, setShowOnlineOptions] = useState(false);
     const [roomKey, setRoomKey] = useState('');
     const navigate = useNavigate();
 
     const handleBadmintonClick = () => {
-        setShowOptions(true);
+        setShowOnlineOptions(true);
     };
 
     const handleSinglePlayer = () => {
         navigate('/scoreboard', { state: { mode: 'single' } });
-    };
-
-    const handleOnlineClick = () => {
-        setShowOptions(false);
-        setShowOnlineOptions(true);
     };
 
     const handleCreateRoom = async () => {
@@ -32,6 +26,7 @@ function Home() {
         navigate('/scoreboard', { state: { mode: 'online', roomKey } });
     };
 
+    // 進入羽球房間
     const handleJoinRoom = () => {
         if (roomKey.length === 5 && /^\d+$/.test(roomKey)) {
             navigate('/scoreboard', { state: { mode: 'online', roomKey } });
@@ -40,19 +35,11 @@ function Home() {
         }
     };
 
-    return (
-        <div className="home">
-            <h1>羽球計分系統</h1>
-            {!showOptions && !showOnlineOptions && (
-                <button onClick={handleBadmintonClick}>羽球</button>
-            )}
-            {showOptions && (
-                <div className="options">
-                    <button onClick={handleSinglePlayer}>單機計分</button>
-                    <button onClick={handleOnlineClick}>線上計分</button>
-                </div>
-            )}
-            {showOnlineOptions && (
+    // 羽球選擇頁面
+    let badmintonPage;
+    if (showOnlineOptions) {
+        badmintonPage = (
+            <>
                 <div className="online-options">
                     <button onClick={handleCreateRoom}>創建房間</button>
                     <div className="join-room">
@@ -66,7 +53,32 @@ function Home() {
                         <button onClick={handleJoinRoom}>加入房間</button>
                     </div>
                 </div>
-            )}
+
+                <button onClick={handleSinglePlayer}>單機計分</button>
+            </>
+        )
+    }
+
+    // 主頁按鈕區
+    let mainPage;
+    if (!showOnlineOptions) {
+        mainPage = (
+            <>
+                <button onClick={handleBadmintonClick}>羽毛球</button>
+                <button onClick={handleBadmintonClick} disabled>籃球</button>
+                <button onClick={handleBadmintonClick} disabled>兩隊自訂</button>
+                <button onClick={handleBadmintonClick} disabled>多人桌游</button>
+            </>
+        )
+    }
+
+    return (
+        <div className="home">
+            <h1>線上連線計分版</h1>
+
+            {mainPage}
+
+            {badmintonPage}
         </div>
     );
 }

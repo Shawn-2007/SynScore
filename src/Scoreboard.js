@@ -609,7 +609,7 @@ function Scoreboard() {
                                             : 'none',
                                 }}
                             >
-                                連發
+                                {/* 連發 */}
                             </div>
                         </div>
                     </div>
@@ -624,7 +624,7 @@ function Scoreboard() {
                         </p>
                         <div className="consecutive-serve-container">
                             <div
-                                className={`consecutive-serve ${rightTeam === 'A' ? 'team-a-serve' : 'team-b-serve'}`}
+                                className={`consecutive-serve `}
                                 style={{
                                     display:
                                         (rightTeam === 'A' && consecutiveScoresA >= 2) ||
@@ -633,8 +633,9 @@ function Scoreboard() {
                                             : 'none',
                                 }}
                             >
-                                連發
+                                {/* 連發 */}
                             </div>
+                            {/* <img className="team-img" src='images/common/main_consecutive_serve_blue.png' width={'150px'} alt='I am B' /> */}
                         </div>
                     </div>
                 </div>
@@ -659,15 +660,15 @@ function Scoreboard() {
     topButton = (
         <>
             <button className="back-button" onClick={toggleBackOverlay}>
-                返回上一頁
+                返回
             </button>
             <div className="top-right-buttons">
                 <button className="undo-button" onClick={undoLastAction} disabled={history.length === 0}>
                     回復
                 </button>
-                <button className="settings-button" onClick={toggleSettings}>
+                {/* <button className="settings-button" onClick={toggleSettings}>
                     設定
-                </button>
+                </button> */}
             </div>
 
             <h1 className="scoreboard-title">
@@ -823,7 +824,7 @@ function Scoreboard() {
                                 {/* 皇冠 */}
                                 {leftTeam === 'A' ? winner === 'A' && (
                                     <div className="crown-label team-a-crown">
-                                        <svg transform="scale(4)" width="40" height="30" viewBox="0 0 64 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <svg width="40" height="30" viewBox="0 0 64 48" fill="none" xmlns="http://www.w3.org/2000/svg">
                                             <defs>
                                                 <linearGradient id="goldGradient" x1="0" y1="0" x2="64" y2="48" gradientUnits="userSpaceOnUse">
                                                     <stop offset="0%" stop-color="#f9d423" />
@@ -836,7 +837,7 @@ function Scoreboard() {
                                     </div>
                                 ) : winner === 'B' && (
                                     <div className="crown-label team-b-crown">
-                                        <svg transform="scale(4)" width="40" height="30" viewBox="0 0 64 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <svg width="40" height="30" viewBox="0 0 64 48" fill="none" xmlns="http://www.w3.org/2000/svg">
                                             <defs>
                                                 <linearGradient id="goldGradient" x1="0" y1="0" x2="64" y2="48" gradientUnits="userSpaceOnUse">
                                                     <stop offset="0%" stop-color="#f9d423" />
@@ -856,7 +857,7 @@ function Scoreboard() {
                                 </span>
                                 {/* 皇冠 */}
                                 {leftTeam === 'A' ? winner === 'B' && (
-                                    <div className="crown-label team-b-crown"><svg transform="scale(4)" width="40" height="30" viewBox="0 0 64 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <div className="crown-label team-b-crown"><svg width="40" height="30" viewBox="0 0 64 48" fill="none" xmlns="http://www.w3.org/2000/svg">
                                         <defs>
                                             <linearGradient id="goldGradient" x1="0" y1="0" x2="64" y2="48" gradientUnits="userSpaceOnUse">
                                                 <stop offset="0%" stop-color="#f9d423" />
@@ -867,7 +868,7 @@ function Scoreboard() {
                                         <path d="M4 12L16 36L32 8L48 36L60 12L56 40H8L4 12Z" fill="url(#goldGradient)" stroke="#ffd700" stroke-width="2" />
                                     </svg></div>
                                 ) : winner === 'A' && (
-                                    <div className="crown-label team-a-crown"><svg transform="scale(4)" width="40" height="30" viewBox="0 0 64 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <div className="crown-label team-a-crown"><svg width="40" height="30" viewBox="0 0 64 48" fill="none" xmlns="http://www.w3.org/2000/svg">
                                         <defs>
                                             <linearGradient id="goldGradient" x1="0" y1="0" x2="64" y2="48" gradientUnits="userSpaceOnUse">
                                                 <stop offset="0%" stop-color="#f9d423" />
@@ -886,20 +887,22 @@ function Scoreboard() {
                     {/* 選擇選項 */}
                     {isGameEndInitiator ? (
                         <>
-                            <h2>選擇先攻隊伍</h2>
+                            <div className="serve-choose-text">
+                                <h2>選擇先攻隊伍</h2>
+                            </div>
                             {
                                 leftTeam === 'A' ? <div className="serve-buttons">
                                     <button
                                         className={`serve-button team-a ${firstServe === 'A' ? 'highlight' : ''}`}
                                         onClick={() => selectFirstServe('A')}
                                     >
-                                        紅方 (隊伍 A)
+                                        紅方
                                     </button>
                                     <button
                                         className={`serve-button team-b ${firstServe === 'B' ? 'highlight' : ''}`}
                                         onClick={() => selectFirstServe('B')}
                                     >
-                                        藍方 (隊伍 B)
+                                        藍方
                                     </button>
                                 </div>
                                     :
@@ -908,30 +911,17 @@ function Scoreboard() {
                                             className={`serve-button team-b ${firstServe === 'B' ? 'highlight' : ''}`}
                                             onClick={() => selectFirstServe('B')}
                                         >
-                                            藍方 (隊伍 B)
+                                            藍方
                                         </button>
                                         <button
                                             className={`serve-button team-a ${firstServe === 'A' ? 'highlight' : ''}`}
                                             onClick={() => selectFirstServe('A')}
                                         >
-                                            紅方 (隊伍 A)
+                                            紅方
                                         </button>
                                     </div>
                             }
-                            {/* <div className="serve-buttons">
-                                <button
-                                    className={`serve-button team-a ${firstServe === 'A' ? 'highlight' : ''}`}
-                                    onClick={() => selectFirstServe('A')}
-                                >
-                                    紅方 (隊伍 A)
-                                </button>
-                                <button
-                                    className={`serve-button team-b ${firstServe === 'B' ? 'highlight' : ''}`}
-                                    onClick={() => selectFirstServe('B')}
-                                >
-                                    藍方 (隊伍 B)
-                                </button>
-                            </div> */}
+
                         </>
                     ) : (
                         <p className="waiting-message">等待房主選擇先攻隊伍...</p>
@@ -964,11 +954,10 @@ function Scoreboard() {
             {firstSelectPage}
 
             {/* 轉跳後倒數 */}
-            {countdownBox}
+            {/* {countdownBox} */}
 
             {/* 上方按鈕 */}
             {topButton}
-
 
             {/* 主要計分頁面 */}
             {mainPage}
