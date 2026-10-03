@@ -1,11 +1,23 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { API_BASE } from './config';
 import './Home.css';
 
 function Home() {
     const [showOnlineOptions, setShowOnlineOptions] = useState(false);
     const [roomKey, setRoomKey] = useState('');
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const handledLink = useRef(false);
+
+    // 分享連結 / QR code：/?room=12345 直接加入房間
+    useEffect(() => {
+        const linkedRoom = searchParams.get('room');
+        if (!linkedRoom || handledLink.current) return;
+        handledLink.current = true;
+        joinRoom(linkedRoom);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const handleBadmintonClick = () => {
         setShowOnlineOptions(true);
@@ -16,24 +28,43 @@ function Home() {
     };
 
     const handleCreateRoom = async () => {
-        const response = await fetch('https://api.shawn4x4.com/nodeApi/api/create-room', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        });
-        const { roomKey } = await response.json();
-        navigate('/scoreboard', { state: { mode: 'online', roomKey } });
+        try {
+            const response = await fetch(`${API_BASE}/api/create-room`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const { roomKey } = await response.json();
+            navigate('/scoreboard', { state: { mode: 'online', roomKey } });
+        } catch (error) {
+            console.error('Error creating room:', error);
+            alert('無法創建房間，請稍後再試！');
+        }
     };
 
     // 進入羽球房間
-    const handleJoinRoom = () => {
-        if (roomKey.length === 5 && /^\d+$/.test(roomKey)) {
-            navigate('/scoreboard', { state: { mode: 'online', roomKey } });
-        } else {
+    const joinRoom = async (key) => {
+        if (!(key.length === 5 && /^\d+$/.test(key))) {
             alert('請輸入有效的 5 碼數字房間金鑰！');
+            return;
+        }
+        try {
+            const response = await fetch(`${API_BASE}/api/room-state?room=${key}`);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            navigate('/scoreboard', { replace: true, state: { mode: 'online', roomKey: key } });
+        } catch (error) {
+            console.error('Error joining room:', error);
+            alert('無法加入房間，請確認房間金鑰是否正確（房間閒置太久會被關閉）！');
         }
     };
+
+    const handleJoinRoom = () => joinRoom(roomKey);
 
     // 羽球選擇頁面
     let badmintonPage;
@@ -55,6 +86,7 @@ function Home() {
                 </div>
 
                 <button onClick={handleSinglePlayer}>單機計分</button>
+                <button onClick={() => navigate('/history')}>歷史紀錄</button>
             </>
         )
     }

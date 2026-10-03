@@ -1,502 +1,271 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useId } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { API_BASE, WS_BASE, postAction } from './config';
+import QRCode from 'qrcode';
+import { createGame, startGame, applyPoint, undo, resetGame, setSwap, toView } from './rules';
+import { syncResults } from './historyStore';
 import './Scoreboard.css';
 
-// 後端地址
-// const BACKEND_URL = 'nas.shawn4x4.com:3001';
-// const BACKEND_URL = 'ec.shawn4x4.com:3001';
-const BACKEND_URL = 'api.shawn4x4.com';
+// 單機模式用同一套規則在本地執行；線上模式則由後端判定，這裡只送出操作
+const localReducers = {
+    point: (game, { team }) => applyPoint(game, team),
+    undo: (game) => undo(game),
+    start: (game, { firstServe }) => startGame(game, firstServe),
+    reset: (game) => resetGame(game),
+    swap: (game, { swapTeams }) => setSwap(game, swapTeams),
+};
+
+// 單機比賽存在 localStorage，意外重新整理或滑掉頁面不會丟失比分
+const LOCAL_GAME_KEY = 'synscore-local-game';
+
+function loadLocalGame() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(LOCAL_GAME_KEY));
+        if (saved && Array.isArray(saved.history)) return saved;
+    } catch (error) {
+        // 讀不到就當作新比賽
+    }
+    return createGame();
+}
+
+const RECONNECT_BASE_MS = 2000;
+const RECONNECT_MAX_MS = 10000;
+
+function Crown({ className }) {
+    const gradientId = useId();
+    return (
+        <div className={`crown-label ${className}`}>
+            <svg width="40" height="30" viewBox="0 0 64 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <linearGradient id={gradientId} x1="0" y1="0" x2="64" y2="48" gradientUnits="userSpaceOnUse">
+                        <stop offset="0%" stopColor="#f9d423" />
+                        <stop offset="50%" stopColor="#ffecb3" />
+                        <stop offset="100%" stopColor="#f9a825" />
+                    </linearGradient>
+                </defs>
+                <path d="M4 12L16 36L32 8L48 36L60 12L56 40H8L4 12Z" fill={`url(#${gradientId})`} stroke="#ffd700" strokeWidth="2" />
+            </svg>
+        </div>
+    );
+}
 
 function Scoreboard() {
-    const [teamAScore, setTeamAScore] = useState(0); // A組分數
-    const [teamBScore, setTeamBScore] = useState(0);
-    const [isSwapped, setIsSwapped] = useState(false); // 鏡像
     const location = useLocation();
     const navigate = useNavigate();
     const { mode, roomKey } = location.state || { mode: 'single', roomKey: null };
+    const isOnline = mode === 'online' && !!roomKey;
 
-    const [gameStarted, setGameStarted] = useState(false); // 遊戲開始
-    const [servingTeam, setServingTeam] = useState(null); // 當前隊伍
-    const [firstServe, setFirstServe] = useState(null); // 先發球
-    const [countdown, setCountdown] = useState(null);
-    const [consecutiveScoresA, setConsecutiveScoresA] = useState(0); // A組連續得分
-    const [consecutiveScoresB, setConsecutiveScoresB] = useState(0); // B組連續得分
+    // 比賽狀態（線上：來自後端；單機：本地）
+    const [rawGame, setRawGame] = useState(() => (isOnline ? createGame() : loadLocalGame()));
+    const game = toView(rawGame);
+    const versionRef = useRef(-1); // 忽略比目前更舊的後端更新
+
+    const [isSwapped, setIsSwapped] = useState(false); // 鏡像（僅本機）
     const [showSettings, setShowSettings] = useState(false); // 按鈕:設定
-    // const [fontSize, setFontSize] = useState('medium');
     const [joinRoomKey, setJoinRoomKey] = useState(''); // 加入房間鑰匙
-    const [winner, setWinner] = useState(null); // 獲勝者
-    const [finalScoreA, setFinalScoreA] = useState(0); // A組最終分數
-    const [finalScoreB, setFinalScoreB] = useState(0); // B組最終分數
     const [errorMessage, setErrorMessage] = useState('');
-    const [history, setHistory] = useState([]); // 歷史
-    const [isTeamsSwapped, setIsTeamsSwapped] = useState(false); // 互換
     const [theme, setTheme] = useState(localStorage.getItem('theme') || 'theme-a'); // 外觀
     const [showBackOverlay, setShowBackOverlay] = useState(false); // 返回上一頁
-    const [isGameEndInitiator, setIsGameEndInitiator] = useState(false); // 是遊戲結束發起者 
-
+    const [showShare, setShowShare] = useState(false); // 分享房間（連結 / QR code）
+    const [qrUrl, setQrUrl] = useState('');
+    const [copied, setCopied] = useState(false);
+    const [pickNext, setPickNext] = useState(false); // 結算後進入「選擇先攻」
+    const [startBanner, setStartBanner] = useState(null); // 新局開始時短暫顯示先攻方
+    const [showServeZone, setShowServeZone] = useState(() => localStorage.getItem('serveZone') !== 'off'); // 發球區提示
 
     // 把外觀存到localStorage
     useEffect(() => {
         localStorage.setItem('theme', theme);
     }, [theme]);
 
-
-    const prevTeamAScoreRef = useRef(teamAScore);
-    const prevTeamBScoreRef = useRef(teamBScore);
-
-    // 連線連發計算與保存
     useEffect(() => {
-        if (!gameStarted) return;
-        if (gameStarted && teamAScore === 0) {
-            setConsecutiveScoresA(0);
+        try {
+            localStorage.setItem('serveZone', showServeZone ? 'on' : 'off');
+        } catch (error) {
+            // 忽略
         }
-        if (gameStarted && teamBScore === 0) {
-            setConsecutiveScoresB(0);
+    }, [showServeZone]);
+
+    // 歷史紀錄：把這個房間（或單機）已完成的場次同步到這支手機
+    useEffect(() => {
+        if (isOnline && !game.roomCreatedAt) return;
+        syncResults(isOnline ? `room-${roomKey}-${game.roomCreatedAt}` : 'local', game.results);
+    }, [isOnline, roomKey, game.roomCreatedAt, game.results]);
+
+    // 新局開始：收起選擇畫面，並顯示先攻方（隨機時才看得出結果）
+    const wasStartedRef = useRef(false);
+    useEffect(() => {
+        if (game.isGameStarted && !wasStartedRef.current) {
+            setPickNext(false);
+            if (game.teamAScore === 0 && game.teamBScore === 0 && game.firstServe) {
+                setStartBanner(game.firstServe);
+            }
         }
+        wasStartedRef.current = game.isGameStarted;
+    }, [game.isGameStarted, game.teamAScore, game.teamBScore, game.firstServe]);
 
-        // saveStateToHistory();
+    useEffect(() => {
+        if (!startBanner) return;
+        const timer = setTimeout(() => setStartBanner(null), 2500);
+        return () => clearTimeout(timer);
+    }, [startBanner]);
 
-        const prevA = prevTeamAScoreRef.current;
-        const prevB = prevTeamBScoreRef.current;
+    // 產生分享用的 QR code
+    const shareUrl = isOnline ? `${window.location.origin}${process.env.PUBLIC_URL || ''}/?room=${roomKey}` : '';
+    useEffect(() => {
+        if (!showShare || !shareUrl) return;
+        let cancelled = false;
+        QRCode.toDataURL(shareUrl, { width: 260, margin: 1 }).then(
+            (url) => !cancelled && setQrUrl(url),
+            () => {}
+        );
+        return () => {
+            cancelled = true;
+        };
+    }, [showShare, shareUrl]);
 
-        // 判斷是哪一隊得分
-        if (teamAScore > prevA && teamBScore === prevB) {
-            // A 隊得分
-            setConsecutiveScoresA((prev) => {
-                const next = prev + 1;
-                return next >= 2 ? 2 : next;
-            });
-            setConsecutiveScoresB(0);
-
-        } else if (teamBScore > prevB && teamAScore === prevA) {
-            // B 隊得分
-            setConsecutiveScoresB((prev) => {
-                const next = prev + 1;
-                return next >= 2 ? 2 : next;
-            });
-            setConsecutiveScoresA(0);
-
-        } else if (teamAScore > prevA && teamBScore > prevB) {
-            // 同時變動，可能是初始化或重置，不計
-            setConsecutiveScoresA(0);
-            setConsecutiveScoresB(0);
+    // 單機模式：每次變動都存檔
+    useEffect(() => {
+        if (isOnline) return;
+        try {
+            localStorage.setItem(LOCAL_GAME_KEY, JSON.stringify(rawGame));
+        } catch (error) {
+            // 儲存空間不可用時忽略
         }
-        // 更新參考用的前一個分數
-        prevTeamAScoreRef.current = teamAScore;
-        prevTeamBScoreRef.current = teamBScore;
+    }, [isOnline, rawGame]);
 
-    }, [teamAScore, teamBScore]);
+    // 比賽進行中保持螢幕不休眠（支援的瀏覽器才有）
+    useEffect(() => {
+        if (!game.isGameStarted || !navigator.wakeLock) return;
+        let lock = null;
+        let released = false;
+        const request = () =>
+            navigator.wakeLock.request('screen').then(
+                (l) => {
+                    if (released) l.release();
+                    else lock = l;
+                },
+                () => {}
+            );
+        const onVisible = () => document.visibilityState === 'visible' && request();
+        request();
+        document.addEventListener('visibilitychange', onVisible);
+        return () => {
+            released = true;
+            document.removeEventListener('visibilitychange', onVisible);
+            if (lock) lock.release();
+        };
+    }, [game.isGameStarted]);
+
+    // 套用後端傳來的狀態
+    const applyRemote = (data) => {
+        if (typeof data.version === 'number') {
+            if (data.version < versionRef.current) return;
+            versionRef.current = data.version;
+        }
+        setRawGame(data);
+    };
 
     // WebSocket 連線
     useEffect(() => {
-        if (mode !== 'online' || !roomKey) return;
+        if (!isOnline) return;
+
+        setRawGame(createGame());
+        versionRef.current = -1;
 
         let ws;
+        let closed = false; // 元件卸載或換房間後不再重連
+        let reconnectTimer = null;
         let reconnectAttempts = 0;
-        const maxReconnectAttempts = 5;
-        const reconnectInterval = 2000;
-        let lastTeamAScore = teamAScore;
-        let lastTeamBScore = teamBScore;
 
-
-        // 連接WebSocket
         const connectWebSocket = () => {
-            // ws = new WebSocket(`ws://${BACKEND_URL}?room=${roomKey}`);
-            // ws = new WebSocket(`ws://ec.shawn4x4.com:3001?room=${roomKey}`);
-            ws = new WebSocket(`wss://api.shawn4x4.com/ws/?room=${roomKey}`);
+            ws = new WebSocket(`${WS_BASE}?room=${roomKey}`);
 
             ws.onopen = () => {
-                // console.log(`Connected to WebSocket server (Room: ${roomKey})`);
                 reconnectAttempts = 0;
-                fetchRoomState();
+                versionRef.current = -1; // 後端重啟時 version 會重新計算
             };
 
             ws.onmessage = (event) => {
-                // console.log('Received WebSocket message:', event.data);
-                const data = JSON.parse(event.data);
-                const newTeamAScore = data.teamAScore || 0;
-                const newTeamBScore = data.teamBScore || 0;
-
-                setTeamAScore(newTeamAScore);
-                setTeamBScore(newTeamBScore);
-                setServingTeam(data.servingTeam || null);
-                setGameStarted(data.isGameStarted || false);
-                setFirstServe(data.firstServe || null);
-                if (data.swapTeams !== undefined) {
-                    setIsTeamsSwapped(data.swapTeams);
-                }
-
-                // 非操作端推斷比賽結束
-                if (!isGameEndInitiator && data.isGameStarted === false && newTeamAScore === 0 && newTeamBScore === 0) {
-                    if (lastTeamAScore > lastTeamBScore) {
-                        setWinner('A');
-                        setFinalScoreA(lastTeamAScore);
-                        setFinalScoreB(lastTeamBScore);
-                    } else if (lastTeamBScore > lastTeamAScore) {
-                        setWinner('B');
-                        setFinalScoreA(lastTeamAScore);
-                        setFinalScoreB(lastTeamBScore);
-                    }
-                }
-
-                // 更新最後一次比分（僅當比分非零時）
-                if (newTeamAScore !== 0 || newTeamBScore !== 0) {
-                    lastTeamAScore = newTeamAScore;
-                    lastTeamBScore = newTeamBScore;
-                }
+                applyRemote(JSON.parse(event.data));
             };
 
-            ws.onclose = () => {
-                // console.log('Disconnected from WebSocket server');
-                if (reconnectAttempts < maxReconnectAttempts) {
-                    // console.log(`Reconnecting in ${reconnectInterval / 1000} seconds... (Attempt ${reconnectAttempts + 1})`);
-                    setTimeout(connectWebSocket, reconnectInterval);
-                    reconnectAttempts++;
-                } else {
-                    console.log('Max reconnect attempts reached. Please refresh the page.');
+            ws.onclose = (event) => {
+                if (closed) return;
+                if (event.code === 4404) {
+                    // 房間不存在（打錯房號，或後端重啟後房間已消失）
+                    alert('房間不存在或已關閉！');
+                    navigate('/', { replace: true });
+                    return;
                 }
+                const delay = Math.min(RECONNECT_BASE_MS * 2 ** reconnectAttempts, RECONNECT_MAX_MS);
+                reconnectAttempts++;
+                reconnectTimer = setTimeout(connectWebSocket, delay);
             };
-
-            ws.onerror = (error) => {
-                // console.log('WebSocket error:', error);
-            };
-        };
-
-        // 取得房間狀態
-        const fetchRoomState = async () => {
-            try {
-                const response = await fetch(`https://${BACKEND_URL}/nodeApi/api/room-state?room=${roomKey}`);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-                setTeamAScore(data.teamAScore || 0);
-                setTeamBScore(data.teamBScore || 0);
-                setServingTeam(data.servingTeam || null);
-                setGameStarted(data.isGameStarted || false);
-                setFirstServe(data.firstServe || null);
-                setIsTeamsSwapped(data.swapTeams || false);
-
-            } catch (error) {
-                console.error('Error fetching room state:', error);
-            }
         };
 
         connectWebSocket();
 
-        return () => {
-            if (ws) {
-                ws.close();
-            }
+        // 手機切到背景再回來時連線常已悄悄中斷，回到前景就立刻重連，不等退避計時
+        const handleVisibility = () => {
+            if (document.visibilityState !== 'visible' || closed) return;
+            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+            clearTimeout(reconnectTimer);
+            reconnectAttempts = 0;
+            connectWebSocket();
         };
-    }, [mode, roomKey]);
+        document.addEventListener('visibilitychange', handleVisibility);
 
-    // 倒數三秒
-    useEffect(() => {
-        if (countdown === null || countdown <= 0) return;
+        return () => {
+            closed = true;
+            clearTimeout(reconnectTimer);
+            document.removeEventListener('visibilitychange', handleVisibility);
+            if (ws) ws.close();
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOnline, roomKey]);
 
-        const timer = setTimeout(() => {
-            setCountdown(countdown - 1);
-            if (countdown - 1 === 0) {
-                setGameStarted(true);
-                updateGameStarted(true);
-                saveStateToHistory();
-            }
-        }, 1000);
-
-        return () => clearTimeout(timer);
-    }, [countdown]);
-
-
-    // 選擇先發球
-    const selectFirstServe = async (team) => {
-        setFirstServe(team);
-        setServingTeam(team);
-        setCountdown(1); //倒數
-        setWinner(null);
-        setFinalScoreA(0);
-        setFinalScoreB(0);
-        setIsGameEndInitiator(false);
-        setHistory([]);
-        if (team === "A") {
-            setConsecutiveScoresA(2);
-            setConsecutiveScoresB(1);
-        } else {
-            setConsecutiveScoresA(1);
-            setConsecutiveScoresB(2);
+    // 執行操作：線上送給後端，單機直接在本地套用規則
+    const act = async (type, payload = {}) => {
+        if (!isOnline) {
+            setRawGame((prev) => localReducers[type](prev, payload));
+            return;
         }
-
-        if (mode === 'online' && roomKey) {
-            try {
-                await fetch(`https://${BACKEND_URL}/nodeApi/api/update-first-serve`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        roomKey,
-                        firstServe: team,
-                        servingTeam: team,
-                        isGameStarted: false,
-                    }),
-                });
-            } catch (error) {
-                console.error('Error updating first serve:', error);
-            }
+        try {
+            applyRemote(await postAction(type, { roomKey, ...payload }));
+        } catch (error) {
+            console.error(`Error sending ${type}:`, error);
         }
     };
 
-    // 更新遊戲開始
-    const updateGameStarted = async (isStarted) => {
-        if (mode === 'online' && roomKey) {
-            try {
-                await fetch(`https://${BACKEND_URL}/nodeApi/api/update-game-started`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        roomKey,
-                        isGameStarted: isStarted,
-                    }),
-                });
-            } catch (error) {
-                console.error('Error updating game started:', error);
-            }
+    const gameStarted = game.isGameStarted;
+    const { winner, firstServe } = game;
+
+    const selectFirstServe = (team) => act('start', { firstServe: team });
+    const incrementScore = (team) => {
+        if (gameStarted) act('point', { team });
+    };
+    const undoLastAction = () => act('undo');
+
+    const copyShareLink = async () => {
+        try {
+            await navigator.clipboard.writeText(shareUrl);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch (error) {
+            window.prompt('複製這個連結：', shareUrl);
         }
     };
-
-    // 保存狀態到歷史
-    const saveStateToHistory = () => {
-        setHistory((prevHistory) => [
-            ...prevHistory,
-            {
-                teamAScore,
-                teamBScore,
-                servingTeam,
-                consecutiveScoresA,
-                consecutiveScoresB,
-            },
-        ]);
+    const nativeShare = () => {
+        navigator.share({ title: 'SynScore 同步記分', text: `加入房間 ${roomKey}`, url: shareUrl }).catch(() => {});
     };
-
-
-    // 撤銷上一個操作，回復
-    const undoLastAction = async () => {
-
-        if (history.length === 0) return;
-
-        const lastState = history[history.length - 1];
-        // setTeamAScore(lastState.teamAScore);
-        // setTeamBScore(lastState.teamBScore);
-        // setServingTeam(lastState.servingTeam);
-
-        if (mode === 'online' && roomKey) {
-            try {
-                const response = await fetch(`https://${BACKEND_URL}/nodeApi/api/update-score`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        roomKey,
-                        teamAScore: lastState.teamAScore,
-                        teamBScore: lastState.teamBScore,
-                        servingTeam: lastState.servingTeam,
-                    }),
-                });
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-            } catch (error) {
-                console.error('Error sending update to backend:', error);
-            }
-        } else {
-            setTeamAScore(lastState.teamAScore);
-            setTeamBScore(lastState.teamBScore);
-            setServingTeam(lastState.servingTeam);
-        }
-
-        console.log("按下按鈕")
-        console.log(history)
-
-        setConsecutiveScoresA(lastState.consecutiveScoresA);
-        setConsecutiveScoresB(lastState.consecutiveScoresB);
-
-        setHistory((prevHistory) => prevHistory.slice(0, -1));
-
-    };
-
-    // 增加分數
-    const incrementScore = async (team) => {
-        if (!gameStarted) return;
-
-        saveStateToHistory();
-
-        // 誇張化加分以供測試
-        let newTeamAScore = team === 'A' ? teamAScore + 1 : teamAScore;
-        let newTeamBScore = team === 'B' ? teamBScore + 1 : teamBScore;
-
-
-        let newServingTeam = servingTeam;
-
-        if (team === 'A') {
-            newServingTeam = 'A';
-        } else {
-            newServingTeam = 'B';
-        }
-        setServingTeam(newServingTeam);
-
-        let gameEnded = false;
-        if (newTeamAScore >= 21 || newTeamBScore >= 21) {
-            if (newTeamAScore >= 30 || newTeamBScore >= 30) {
-                if (newTeamAScore >= 30) {
-                    setWinner('A');
-                    setFinalScoreA(newTeamAScore - 1);
-                    setFinalScoreB(newTeamBScore);
-                    gameEnded = true;
-                } else if (newTeamBScore >= 30) {
-                    setWinner('B');
-                    setFinalScoreA(newTeamAScore);
-                    setFinalScoreB(newTeamBScore - 1);
-                    gameEnded = true;
-                }
-            } else if (newTeamAScore >= 21 && newTeamBScore < 20) {
-                setWinner('A');
-                setFinalScoreA(newTeamAScore);
-                setFinalScoreB(newTeamBScore);
-                gameEnded = true;
-            } else if (newTeamBScore >= 21 && newTeamAScore < 20) {
-                setWinner('B');
-                setFinalScoreA(newTeamAScore);
-                setFinalScoreB(newTeamBScore);
-                gameEnded = true;
-            } else if (newTeamAScore >= 20 && newTeamBScore >= 20) {
-                if (newTeamAScore - newTeamBScore >= 2) {
-                    setWinner('A');
-                    setFinalScoreA(newTeamAScore);
-                    setFinalScoreB(newTeamBScore);
-                    gameEnded = true;
-                } else if (newTeamBScore - newTeamAScore >= 2) {
-                    setWinner('B');
-                    setFinalScoreA(newTeamAScore);
-                    setFinalScoreB(newTeamBScore);
-                    gameEnded = true;
-                }
-            }
-        }
-
-        // 遊戲結束 重設
-        if (gameEnded) {
-            setIsGameEndInitiator(true);
-            setGameStarted(false);
-            setFirstServe(null);
-            setServingTeam(null);
-            setCountdown(null); //倒數
-            setHistory([]);
-            newTeamAScore = 0;
-            newTeamBScore = 0;
-            setTeamAScore(0);
-            setTeamBScore(0);
-            setConsecutiveScoresA(0);
-            setConsecutiveScoresB(0);
-            updateGameStarted(false);
-
-        }
-
-        if (mode === 'online' && roomKey) {
-            try {
-                const response = await fetch(`https://${BACKEND_URL}/nodeApi/api/update-score`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        roomKey,
-                        teamAScore: newTeamAScore,
-                        teamBScore: newTeamBScore,
-                        servingTeam: newServingTeam,
-                    }),
-                });
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-            } catch (error) {
-                console.error('Error sending update to backend:', error);
-            }
-        } else {
-            setTeamAScore(newTeamAScore);
-            setTeamBScore(newTeamBScore);
+    // 線上重置會清掉所有人的比賽，先確認避免誤觸
+    const resetScores = () => {
+        if (window.confirm(isOnline ? '確定要重置比賽嗎？房間內所有人的比分都會清除。' : '確定要重置比賽嗎？')) {
+            act('reset');
         }
     };
-
-    // 重置分數
-    const resetScores = async () => {
-        if (mode === 'online' && roomKey) {
-            try {
-                const response = await fetch(`https://${BACKEND_URL}/nodeApi/api/update-score`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        roomKey,
-                        teamAScore: 0,
-                        teamBScore: 0,
-                        servingTeam: null,
-                        isGameStarted: false,
-                    }),
-                });
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                setGameStarted(false);
-                setFirstServe(null);
-                setCountdown(null); //倒數
-            } catch (error) {
-                console.error('Error resetting scores:', error);
-            }
-        } else {
-            setTeamAScore(0);
-            setTeamBScore(0);
-            setConsecutiveScoresA(0);
-            setConsecutiveScoresB(0);
-            setGameStarted(false);
-            setFirstServe(null);
-            setServingTeam(null);
-            setCountdown(null); //倒數
-            setWinner(null);
-            setHistory([]);
-        }
-    };
-
-    // 互換
-    const swapTeams = async () => {
-        const newSwapState = !isTeamsSwapped;
-        setIsTeamsSwapped(newSwapState);
-
-        if (mode === 'online' && roomKey) {
-            try {
-                const response = await fetch(`https://${BACKEND_URL}/nodeApi/api/update-swap`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        roomKey,
-                        swapTeams: newSwapState,
-                    }),
-                });
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-            } catch (error) {
-                console.error('Error swapping teams:', error);
-            }
-        }
-    };
-
-
+    const swapTeams = () => act('swap', { swapTeams: !game.swapTeams });
 
     // 按鈕:設定
     const toggleSettings = () => {
@@ -507,6 +276,7 @@ function Scoreboard() {
     // 按鈕:返回上一頁
     const toggleBackOverlay = () => {
         setShowBackOverlay(!showBackOverlay);
+        setErrorMessage('');
     };
 
     // 按鈕:返回首頁
@@ -518,8 +288,7 @@ function Scoreboard() {
     // 按鈕:創建房間
     const handleCreateRoom = async () => {
         try {
-            console.log('Attempting to create room...');
-            const response = await fetch(`https://${BACKEND_URL}/nodeApi/api/create-room`, {
+            const response = await fetch(`${API_BASE}/api/create-room`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -531,15 +300,12 @@ function Scoreboard() {
             }
 
             const data = await response.json();
-            console.log('Create room response:', data);
-
             if (!data.roomKey) {
                 throw new Error('No roomKey returned from server');
             }
 
-            const newRoomKey = data.roomKey;
             setShowBackOverlay(false);
-            navigate('/scoreboard', { state: { mode: 'online', roomKey: newRoomKey } });
+            navigate('/scoreboard', { state: { mode: 'online', roomKey: data.roomKey } });
         } catch (error) {
             console.error('Error in handleCreateRoom:', error);
             setErrorMessage('無法創建房間，請稍後再試！');
@@ -554,14 +320,10 @@ function Scoreboard() {
         }
 
         try {
-            console.log('Attempting to join room:', joinRoomKey);
-            const response = await fetch(`https://${BACKEND_URL}/nodeApi/api/room-state?room=${joinRoomKey}`);
+            const response = await fetch(`${API_BASE}/api/room-state?room=${joinRoomKey}`);
             if (!response.ok) {
                 throw new Error(`Room does not exist or inaccessible: ${response.status}`);
             }
-
-            const data = await response.json();
-            // console.log('Join room response:', data);
 
             setShowBackOverlay(false);
             navigate('/scoreboard', { state: { mode: 'online', roomKey: joinRoomKey } });
@@ -582,9 +344,24 @@ function Scoreboard() {
         setIsSwapped(!isSwapped);
     };
 
-    const leftTeam = (isSwapped !== isTeamsSwapped) ? 'B' : 'A';
-    const rightTeam = (isSwapped !== isTeamsSwapped) ? 'A' : 'B';
+    const flipped = isSwapped !== game.swapTeams;
+    const leftTeam = flipped ? 'B' : 'A';
+    const rightTeam = flipped ? 'A' : 'B';
+    const scoreOf = (team) => (team === 'A' ? game.teamAScore : game.teamBScore);
+    // 發球區：發球方分數為偶數從右區、奇數從左區發球
+    const serveZoneOf = (team) => (game.servingTeam === team ? (scoreOf(team) % 2 === 0 ? '右' : '左') : null);
+    const hasServeMark = (team) => (team === 'A' ? game.consecutiveA : game.consecutiveB) >= 2;
 
+    // 彩帶位置只隨機一次，避免每次重新渲染都閃動
+    const confettiPieces = useMemo(
+        () =>
+            [...Array(50)].map(() => ({
+                left: `${Math.random() * 100}%`,
+                animationDelay: `${Math.random() * 2}s`,
+                backgroundColor: `hsl(${Math.random() * 360}, 70%, 50%)`,
+            })),
+        []
+    );
 
     // 頁面:主要計分頁面
     let mainPage;
@@ -597,20 +374,15 @@ function Scoreboard() {
                         className={`team team-left ${leftTeam === 'A' ? 'team-a' : 'team-b'}`}
                         onClick={() => incrementScore(leftTeam)}
                     >
+                        {showServeZone && serveZoneOf(leftTeam) && <span className="serve-zone">發球 {serveZoneOf(leftTeam)}區</span>}
                         <h2>隊伍 {leftTeam}</h2>
                         <p className={`score-text score-medium`}>
-                            {leftTeam === 'A' ? teamAScore : teamBScore}
+                            {scoreOf(leftTeam)}
                         </p>
                         <div className="consecutive-serve-container">
                             <div
                                 className={`consecutive-serve ${leftTeam === 'A' ? 'team-a-serve' : 'team-b-serve'}`}
-                                style={{
-                                    display:
-                                        (leftTeam === 'A' && consecutiveScoresA >= 2) ||
-                                            (leftTeam === 'B' && consecutiveScoresB >= 2)
-                                            ? 'block'
-                                            : 'none',
-                                }}
+                                style={{ display: hasServeMark(leftTeam) ? 'block' : 'none' }}
                             >
                                 {/* 連發 */}
                             </div>
@@ -621,24 +393,18 @@ function Scoreboard() {
                         className={`team team-right ${rightTeam === 'A' ? 'team-a' : 'team-b'}`}
                         onClick={() => incrementScore(rightTeam)}
                     >
+                        {showServeZone && serveZoneOf(rightTeam) && <span className="serve-zone">發球 {serveZoneOf(rightTeam)}區</span>}
                         <h2>隊伍 {rightTeam}</h2>
                         <p className={`score-text score-medium`}>
-                            {rightTeam === 'A' ? teamAScore : teamBScore}
+                            {scoreOf(rightTeam)}
                         </p>
                         <div className="consecutive-serve-container">
                             <div
                                 className={`consecutive-serve `}
-                                style={{
-                                    display:
-                                        (rightTeam === 'A' && consecutiveScoresA >= 2) ||
-                                            (rightTeam === 'B' && consecutiveScoresB >= 2)
-                                            ? 'block'
-                                            : 'none',
-                                }}
+                                style={{ display: hasServeMark(rightTeam) ? 'block' : 'none' }}
                             >
                                 {/* 連發 */}
                             </div>
-                            {/* <img className="team-img" src='images/common/main_consecutive_serve_blue.png' width={'150px'} alt='I am B' /> */}
                         </div>
                     </div>
                 </div>
@@ -647,26 +413,30 @@ function Scoreboard() {
     }
 
     // 頁面:下方按鈕
-    let bottomButton;
-    bottomButton = (
+    const bottomButton = (
         <>
             <div className="bottomButtons">
                 <button className="mirror-button" onClick={mirrorTeams}>鏡射</button>
                 <button className="swap-button" onClick={swapTeams}>互換</button>
+                <button className={showServeZone ? '' : 'toggle-off'} onClick={() => setShowServeZone(!showServeZone)}>發球區{showServeZone ? '：開' : '：關'}</button>
                 <button onClick={resetScores}>重置</button>
             </div>
         </>
-    )
+    );
 
     // 頁面:上方按鈕
-    let topButton;
-    topButton = (
+    const topButton = (
         <>
             <button className="back-button" onClick={toggleBackOverlay}>
                 返回
             </button>
             <div className="top-right-buttons">
-                <button className="undo-button" onClick={undoLastAction} disabled={history.length === 0}>
+                {isOnline && (
+                    <button className="share-button" onClick={() => setShowShare(true)}>
+                        分享
+                    </button>
+                )}
+                <button className="undo-button" onClick={undoLastAction} disabled={!game.canUndo}>
                     回復
                 </button>
                 {/* <button className="settings-button" onClick={toggleSettings}>
@@ -675,10 +445,10 @@ function Scoreboard() {
             </div>
 
             <h1 className="scoreboard-title">
-                {mode === 'online' && roomKey ? `(房間: ${roomKey})` : ''}
+                {isOnline ? `(房間: ${roomKey})` : ''}
             </h1>
         </>
-    )
+    );
 
     // 頁面:上一頁
     let previousPage;
@@ -710,6 +480,7 @@ function Scoreboard() {
                                 />
                                 <button onClick={handleJoinRoom}>加入房間</button>
                             </div>
+                            {errorMessage && <p className="error-message">{errorMessage}</p>}
                         </div>
                     </div>
                 </div>
@@ -752,197 +523,133 @@ function Scoreboard() {
     }
 
     // 特效頁面:灑彩帶
-    let sprinkles;
-    sprinkles = (
+    const sprinkles = (
         <>
             <div className={`confetti-container ${gameStarted ? '' : 'active'}`}>
-                {[...Array(50)].map((_, i) => (
-                    <div
-                        key={i}
-                        className="confetti-piece"
-                        style={{
-                            left: `${Math.random() * 100}%`,
-                            animationDelay: `${Math.random() * 2}s`,
-                            backgroundColor: `hsl(${Math.random() * 360}, 70%, 50%)`,
-                        }}
-                    />
+                {confettiPieces.map((style, i) => (
+                    <div key={i} className="confetti-piece" style={style} />
                 ))}
             </div>
         </>
-    )
+    );
 
-    // 倒數框
-    let countdownBox;
-    if (countdown !== null && countdown > 0) {
-        countdownBox = (
-            <>
-                <div className="countdown-overlay">
-                    <div className="countdown-box">
-                        <span>{countdown}</span>
-                    </div>
-                </div>
-            </>
-        )
-    }
+    // 選擇先攻隊伍的按鈕（依左右位置排列）
+    const serveButton = (team) => (
+        <button
+            key={team}
+            className={`serve-button ${team === 'A' ? 'team-a' : 'team-b'}`}
+            onClick={() => selectFirstServe(team)}
+        >
+            {team === 'A' ? '紅方先攻' : '藍方先攻'}
+        </button>
+    );
 
-    // 首次選擇先攻隊伍(先不管這裡了)
+    // 選擇先攻：指定一方，或隨機決定
+    const serveChooser = (
+        <>
+            <div className="serve-choose-text">
+                <h2>選擇先攻隊伍</h2>
+            </div>
+            <div className="serve-buttons">
+                {serveButton(leftTeam)}
+                {serveButton(rightTeam)}
+            </div>
+            <div className="serve-buttons">
+                <button className="serve-button random" onClick={() => selectFirstServe('random')}>
+                    🎲 隨機決定
+                </button>
+            </div>
+        </>
+    );
+
+    // 首次選擇先攻隊伍，或結算後按「再來一局」
     let firstSelectPage;
-    if (!gameStarted && firstServe === null) {
+    if (!gameStarted && ((!winner && firstServe === null) || pickNext)) {
         firstSelectPage = (
             <>
                 <div className="select-serve">
-                    <h2>選擇先攻隊伍</h2>
-                    <div className="serve-buttons">
-                        <button
-                            className={`serve-button team-a ${firstServe === 'A' ? 'highlight' : ''}`}
-                            onClick={() => selectFirstServe('A')}
-                        >
-                            紅方 (隊伍 A)
+                    {serveChooser}
+                    {pickNext && winner && (
+                        <button className="plain-button" onClick={() => setPickNext(false)}>
+                            ← 返回結算
                         </button>
-                        <button
-                            className={`serve-button team-b ${firstServe === 'B' ? 'highlight' : ''}`}
-                            onClick={() => selectFirstServe('B')}
-                        >
-                            藍方 (隊伍 B)
-                        </button>
-                    </div>
-                </div>
-            </>
-        )
-
-    }
-
-    // 頁面:結算畫面 主要處理這塊
-    let showWinPage;
-    if (!gameStarted && winner) {
-        showWinPage = (
-            <>
-                <div className="select-serve">
-                    <div className="victory-message">
-                        <div className="final-score-container">
-                            <div className="final-score team-a-score">
-                                <span className={`${leftTeam === 'A' ? 'team-a-text' : 'team-b-text'}`}>
-                                    {leftTeam === 'A' ? winner === 'A' ? finalScoreA + 1 : finalScoreA : winner === 'B' ? finalScoreB + 1 : finalScoreB}
-                                </span>
-                                {/* 皇冠 */}
-                                {leftTeam === 'A' ? winner === 'A' && (
-                                    <div className="crown-label team-a-crown">
-                                        <svg width="40" height="30" viewBox="0 0 64 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                            <defs>
-                                                <linearGradient id="goldGradient" x1="0" y1="0" x2="64" y2="48" gradientUnits="userSpaceOnUse">
-                                                    <stop offset="0%" stop-color="#f9d423" />
-                                                    <stop offset="50%" stop-color="#ffecb3" />
-                                                    <stop offset="100%" stop-color="#f9a825" />
-                                                </linearGradient>
-                                            </defs>
-                                            <path d="M4 12L16 36L32 8L48 36L60 12L56 40H8L4 12Z" fill="url(#goldGradient)" stroke="#ffd700" stroke-width="2" />
-                                        </svg>
-                                    </div>
-                                ) : winner === 'B' && (
-                                    <div className="crown-label team-b-crown">
-                                        <svg width="40" height="30" viewBox="0 0 64 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                            <defs>
-                                                <linearGradient id="goldGradient" x1="0" y1="0" x2="64" y2="48" gradientUnits="userSpaceOnUse">
-                                                    <stop offset="0%" stop-color="#f9d423" />
-                                                    <stop offset="50%" stop-color="#ffecb3" />
-                                                    <stop offset="100%" stop-color="#f9a825" />
-                                                </linearGradient>
-                                            </defs>
-                                            <path d="M4 12L16 36L32 8L48 36L60 12L56 40H8L4 12Z" fill="url(#goldGradient)" stroke="#ffd700" stroke-width="2" />
-                                        </svg>
-                                    </div>
-                                )}
-                            </div>
-                            <span> : </span>
-                            <div className="final-score team-b-score">
-                                <span className={`${leftTeam === 'A' ? 'team-b-text' : 'team-a-text'}`}>
-                                    {leftTeam === 'A' ? winner === 'B' ? finalScoreB + 1 : finalScoreB : winner === 'A' ? finalScoreA + 1 : finalScoreA}
-                                </span>
-                                {/* 皇冠 */}
-                                {leftTeam === 'A' ? winner === 'B' && (
-                                    <div className="crown-label team-b-crown"><svg width="40" height="30" viewBox="0 0 64 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <defs>
-                                            <linearGradient id="goldGradient" x1="0" y1="0" x2="64" y2="48" gradientUnits="userSpaceOnUse">
-                                                <stop offset="0%" stop-color="#f9d423" />
-                                                <stop offset="50%" stop-color="#ffecb3" />
-                                                <stop offset="100%" stop-color="#f9a825" />
-                                            </linearGradient>
-                                        </defs>
-                                        <path d="M4 12L16 36L32 8L48 36L60 12L56 40H8L4 12Z" fill="url(#goldGradient)" stroke="#ffd700" stroke-width="2" />
-                                    </svg></div>
-                                ) : winner === 'A' && (
-                                    <div className="crown-label team-a-crown"><svg width="40" height="30" viewBox="0 0 64 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <defs>
-                                            <linearGradient id="goldGradient" x1="0" y1="0" x2="64" y2="48" gradientUnits="userSpaceOnUse">
-                                                <stop offset="0%" stop-color="#f9d423" />
-                                                <stop offset="50%" stop-color="#ffecb3" />
-                                                <stop offset="100%" stop-color="#f9a825" />
-                                            </linearGradient>
-                                        </defs>
-                                        <path d="M4 12L16 36L32 8L48 36L60 12L56 40H8L4 12Z" fill="url(#goldGradient)" stroke="#ffd700" stroke-width="2" />
-                                    </svg></div>
-                                )}
-                            </div>
-                        </div>
-                        <p className="play-again-text">再來一局嗎？</p>
-                    </div>
-
-                    {/* 選擇選項 */}
-                    {isGameEndInitiator ? (
-                        <>
-                            <div className="serve-choose-text">
-                                <h2>選擇先攻隊伍</h2>
-                            </div>
-                            {
-                                leftTeam === 'A' ? <div className="serve-buttons">
-                                    <button
-                                        className={`serve-button team-a ${firstServe === 'A' ? 'highlight' : ''}`}
-                                        onClick={() => selectFirstServe('A')}
-                                    >
-                                        紅方
-                                    </button>
-                                    <button
-                                        className={`serve-button team-b ${firstServe === 'B' ? 'highlight' : ''}`}
-                                        onClick={() => selectFirstServe('B')}
-                                    >
-                                        藍方
-                                    </button>
-                                </div>
-                                    :
-                                    <div className="serve-buttons">
-                                        <button
-                                            className={`serve-button team-b ${firstServe === 'B' ? 'highlight' : ''}`}
-                                            onClick={() => selectFirstServe('B')}
-                                        >
-                                            藍方
-                                        </button>
-                                        <button
-                                            className={`serve-button team-a ${firstServe === 'A' ? 'highlight' : ''}`}
-                                            onClick={() => selectFirstServe('A')}
-                                        >
-                                            紅方
-                                        </button>
-                                    </div>
-                            }
-
-                        </>
-                    ) : (
-                        <p className="waiting-message">等待房主選擇先攻隊伍...</p>
                     )}
                 </div>
             </>
         )
     }
 
+    // 頁面:結算畫面（比分直接使用後端判定的最終比分）
+    let showWinPage;
+    if (!gameStarted && winner && !pickNext) {
+        const textClass = (team) => (team === 'A' ? 'team-a-text' : 'team-b-text');
+        const crownClass = (team) => (team === 'A' ? 'team-a-crown' : 'team-b-crown');
+        showWinPage = (
+            <>
+                <div className="select-serve">
+                    <div className="victory-message">
+                        <div className="final-score-container">
+                            <div className="final-score team-a-score">
+                                <span className={textClass(leftTeam)}>{scoreOf(leftTeam)}</span>
+                                {winner === leftTeam && <Crown className={crownClass(leftTeam)} />}
+                            </div>
+                            <span> : </span>
+                            <div className="final-score team-b-score">
+                                <span className={textClass(rightTeam)}>{scoreOf(rightTeam)}</span>
+                                {winner === rightTeam && <Crown className={crownClass(rightTeam)} />}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="serve-buttons">
+                        <button className="serve-button next-game" onClick={() => setPickNext(true)}>
+                            再來一局
+                        </button>
+                    </div>
+                    {game.canUndo && (
+                        <button className="plain-button" onClick={undoLastAction}>
+                            ↩ 誤按？回復最後一分
+                        </button>
+                    )}
+                </div>
+            </>
+        )
+    }
+
+    // 頁面:分享房間
+    let sharePage;
+    if (showShare && isOnline) {
+        sharePage = (
+            <div className="back-overlay">
+                <div className="share-panel">
+                    <h1>邀請朋友加入</h1>
+                    <p className="share-room">房間 {roomKey}</p>
+                    {qrUrl ? <img className="share-qr" src={qrUrl} alt="房間 QR code" /> : <div className="share-qr" />}
+                    <p className="share-hint">用手機相機掃描，或傳送連結</p>
+                    <div className="share-actions">
+                        <button onClick={copyShareLink}>{copied ? '已複製 ✓' : '複製連結'}</button>
+                        {navigator.share && <button onClick={nativeShare}>分享…</button>}
+                        <button className="plain-button" onClick={() => setShowShare(false)}>關閉</button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // 新局開始提示
+    const startBannerBox = startBanner && (
+        <div className="start-banner">先攻：{startBanner === 'A' ? '紅方' : '藍方'}</div>
+    );
 
     // 渲染
     return (
         <div className={`app ${theme}`}>
 
-
-
             {/* 上一頁頁面 */}
             {previousPage}
+
+            {sharePage}
+            {startBannerBox}
 
             {/* 設定頁面 */}
             {settingsPage}
@@ -955,9 +662,6 @@ function Scoreboard() {
 
             {/* 首次選擇先攻畫面 */}
             {firstSelectPage}
-
-            {/* 轉跳後倒數 */}
-            {/* {countdownBox} */}
 
             {/* 上方按鈕 */}
             {topButton}

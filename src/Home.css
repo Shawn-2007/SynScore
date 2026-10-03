@@ -4,6 +4,7 @@
     align-items: center;
     justify-content: center;
     height: 100vh;
+    height: 100dvh; /* 手機網址列伸縮時不切掉底部 */
     background-color: #f0f0f0;
 }
 
