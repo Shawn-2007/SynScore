@@ -28,6 +28,11 @@ function createGame() {
         swapTeams: false,
         consecutiveA: 0, // 連續得分（最多 2），>= 2 時顯示連發標示
         consecutiveB: 0,
+        // 雙打站位追蹤：開局站右邊的人叫「雙」、站左邊的叫「單」。
+        // 發球方得分時兩位隊友換位（同一人再發），接發球方得分則不換位；flip 為 true 表示該隊目前「單」站右邊。
+        flipA: false,
+        flipB: false,
+        serveRoll: 0,
         winner: null,
         startedAt: null,
         results: [], // 已完成的場次：{ startedAt, endedAt, teamAScore, teamBScore, winner, firstServe }
@@ -48,6 +53,8 @@ function startGame(game, team, now = Date.now(), random = Math.random) {
         isGameStarted: true,
         consecutiveA: team === 'A' ? 2 : 1,
         consecutiveB: team === 'B' ? 2 : 1,
+        flipA: false,
+        flipB: false,
         winner: null,
         startedAt: now,
         history: [],
@@ -57,11 +64,13 @@ function startGame(game, team, now = Date.now(), random = Math.random) {
 // 開局後、第一分之前（0:0）可以改先攻方；team 可為 'A' | 'B' | 'random'
 function setFirstServe(game, team, random = Math.random) {
     if (!game.isGameStarted || game.history.length > 0) return game;
+    const isRandom = team === 'random';
     if (team === 'random') team = random() < 0.5 ? 'A' : 'B';
     return {
         ...game,
         servingTeam: team,
         firstServe: team,
+        serveRoll: (game.serveRoll || 0) + (isRandom ? 1 : 0),
         consecutiveA: team === 'A' ? 2 : 1,
         consecutiveB: team === 'B' ? 2 : 1,
     };
@@ -76,6 +85,8 @@ function applyPoint(game, team, now = Date.now()) {
         servingTeam: game.servingTeam,
         consecutiveA: game.consecutiveA,
         consecutiveB: game.consecutiveB,
+        flipA: game.flipA,
+        flipB: game.flipB,
     };
 
     const teamAScore = game.teamAScore + (team === 'A' ? 1 : 0);
@@ -87,6 +98,9 @@ function applyPoint(game, team, now = Date.now()) {
         servingTeam: team,
         consecutiveA: team === 'A' ? Math.min(game.consecutiveA + 1, 2) : 0,
         consecutiveB: team === 'B' ? Math.min(game.consecutiveB + 1, 2) : 0,
+        // 只有「發球方得分」才換位
+        flipA: team === 'A' && game.servingTeam === 'A' ? !game.flipA : game.flipA,
+        flipB: team === 'B' && game.servingTeam === 'B' ? !game.flipB : game.flipB,
         history: [...game.history, snapshot],
     };
 
@@ -137,6 +151,29 @@ function resetGame(game) {
     return newGame(game, game.firstServe || 'A');
 }
 
+// 目前發球／接發球的場地與球員（雙打）。court 為 'right' | 'left'（各隊自己的右、左發球區）；
+// player 為 'even'（開局站右邊的「雙」）或 'odd'（開局站左邊的「單」）。未開局時回傳 null。
+function serveInfo(game) {
+    if (!game.isGameStarted || !game.servingTeam) return null;
+    const serverTeam = game.servingTeam;
+    const receiverTeam = otherTeam(serverTeam);
+    const serverScore = serverTeam === 'A' ? game.teamAScore : game.teamBScore;
+    const court = serverScore % 2 === 0 ? 'right' : 'left';
+    const playerAt = (team, c) => {
+        const flipped = team === 'A' ? game.flipA : game.flipB;
+        const rightPlayer = flipped ? 'odd' : 'even';
+        if (c === 'right') return rightPlayer;
+        return rightPlayer === 'even' ? 'odd' : 'even';
+    };
+    return {
+        serverTeam,
+        receiverTeam,
+        court,
+        serverPlayer: playerAt(serverTeam, court),
+        receiverPlayer: playerAt(receiverTeam, court), // 接發球員站在對角，也就是同一側的發球區
+    };
+}
+
 function setSwap(game, swapTeams) {
     return { ...game, swapTeams: !!swapTeams };
 }
@@ -158,6 +195,7 @@ module.exports = {
     undo,
     resetGame,
     setSwap,
+    serveInfo,
     toView,
     otherTeam,
 };

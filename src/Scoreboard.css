@@ -1048,3 +1048,191 @@ button.plain-button:hover {
         font-size: 0.85em;
     }
 }
+
+/* ===== 接發球提示 / 單雙 / 先攻選擇移到頂端 / 不捲動也看得到底部 ===== */
+.serve-half.receive {
+    box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.5);
+}
+
+.serve-player {
+    position: absolute;
+    min-width: 90px;
+    box-sizing: border-box;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: bold;
+    font-size: 1.15em;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.serve-player.is-server {
+    background: rgba(255, 255, 255, 0.95);
+    color: #222;
+}
+
+.serve-player.is-receiver {
+    background: rgba(0, 0, 0, 0.28);
+    color: white;
+}
+
+/* 發球者：標在羽球圖示正下方；接發球者：標在對角那半的同一側中間 */
+.serve-player.is-server.in-top { top: calc(25% + 50px); }
+.serve-player.is-server.in-bottom { top: calc(75% + 50px); }
+.serve-player.is-receiver.in-top { top: calc(25% - 14px); }
+.serve-player.is-receiver.in-bottom { top: calc(75% - 14px); }
+.serve-player.on-left { left: 16px; }
+.serve-player.on-right { right: 16px; }
+
+.start-banner small {
+    display: block;
+    margin-top: 6px;
+    font-size: 0.4em;
+    font-weight: normal;
+    opacity: 0.9;
+}
+
+/* 先攻選擇：寬螢幕放頂端（和分享、回復並排），窄螢幕放底部 */
+.top-right-buttons .serve-picker {
+    margin: 0;
+    flex-wrap: nowrap;
+    gap: 4px;
+}
+
+.top-right-buttons .serve-picker-label {
+    font-size: 0.85em;
+}
+
+.top-right-buttons .serve-picker button {
+    padding: 6px 10px;
+    font-size: 0.85em;
+}
+
+.top-right-buttons {
+    align-items: center;
+}
+
+.serve-picker.picker-bottom {
+    display: none;
+}
+
+@media (max-width: 640px) {
+    .top-right-buttons .serve-picker.picker-top {
+        display: none;
+    }
+
+    .serve-picker.picker-bottom {
+        display: flex;
+    }
+
+    .serve-player { min-width: 56px; font-size: 0.95em; padding: 2px 8px; }
+    .serve-player.is-server.in-top { top: calc(25% + 30px); }
+    .serve-player.is-server.in-bottom { top: calc(75% + 30px); }
+    .serve-player.on-left { left: 8px; }
+    .serve-player.on-right { right: 8px; }
+}
+
+/* 版面：畫面高度固定，分數字級跟著螢幕高度走，底部那排按鈕不用捲動就看得到 */
+.app {
+    width: 100%;
+    padding: 12px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    gap: 12px;
+}
+
+.scoreboard-header {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.scoreboard-header .back-button,
+.scoreboard-header .top-right-buttons,
+.scoreboard-header .scoreboard-title {
+    position: static;
+    transform: none;
+    margin: 0;
+}
+
+.scoreboard-header .scoreboard-title {
+    flex: 1;
+    font-size: clamp(18px, 2.5vw, 30px);
+    white-space: nowrap;
+}
+
+.scoreboard-header .top-right-buttons { flex-wrap: wrap; }
+.scoreboard-header button { width: auto; max-width: none; margin: 0; min-height: 40px; }
+.scoreboard-header .serve-picker { flex-wrap: nowrap; }
+
+.app .scoreboard {
+    flex: 1;
+    min-height: 0;
+    margin: 0;
+    gap: 12px;
+    align-items: stretch;
+}
+
+.app .team {
+    container-type: size;
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    min-height: 0;
+    max-width: none;
+    max-height: none;
+    height: auto;
+    padding: 0;
+    margin: 0;
+}
+
+.app .team h2 {
+    position: absolute;
+    top: 8px;
+    margin: 0;
+    font-size: clamp(18px, 3vw, 28px);
+}
+
+.app .team p.score-text {
+    margin: 0;
+    line-height: 1;
+    font-size: min(32vw, 62vh);
+    font-size: min(70cqh, 76cqw);
+}
+
+.app .bottomButtons { flex-shrink: 0; gap: 8px; }
+.app .bottomButtons button { width: auto; max-width: none; margin: 0; min-height: 40px; }
+.app .serve-icon { width: 64px; height: 64px; margin-top: -40px; }
+.app .serve-icon.plain { margin-top: 0; }
+.app .serve-player { min-width: 64px; font-size: 18px; padding: 3px 6px; }
+.app .serve-player.is-server.in-top { top: calc(25% + 24px); }
+.app .serve-player.is-server.in-bottom { top: calc(75% + 24px); }
+.start-banner { max-width: calc(100vw - 64px); text-align: center; }
+
+@media (max-width: 768px) and (orientation: portrait) {
+    .app .scoreboard { flex-direction: column; }
+    .app .team p.score-text { font-size: min(70cqh, 65cqw); }
+}
+
+@media (max-width: 640px) {
+    .app { padding: 8px; gap: 8px; }
+    .scoreboard-header { gap: 6px; }
+    .scoreboard-header .top-right-buttons { justify-content: flex-end; flex: 1 0 100%; }
+    .scoreboard-header .serve-picker { margin-right: auto; }
+    .scoreboard-header button { padding: 6px 8px; }
+    .app .bottomButtons { gap: 5px; }
+    .app .bottomButtons button { padding: 6px 8px; font-size: 13px; }
+}
+
+@media (max-height: 580px) {
+    .app { gap: 6px; padding: 8px; }
+    .app .serve-icon { width: 42px; height: 42px; margin-top: -28px; }
+    .app .serve-player { font-size: 14px; min-width: 56px; }
+    .app .serve-player.is-server.in-top { top: calc(25% + 14px); }
+    .app .serve-player.is-server.in-bottom { top: calc(75% + 14px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .serve-icon { animation: none; }
+}

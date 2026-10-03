@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useId } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { WS_BASE, postAction } from './config';
 import QRCode from 'qrcode';
-import { createGame, newGame, startGame, setFirstServe, applyPoint, undo, resetGame, setSwap, toView } from './rules';
+import { createGame, newGame, startGame, setFirstServe, applyPoint, undo, resetGame, setSwap, serveInfo, toView } from './rules';
 import { syncResults } from './historyStore';
 import { ResultItem } from './ResultList';
 import './Scoreboard.css';
@@ -23,7 +23,26 @@ const LOCAL_GAME_KEY = 'synscore-local-game';
 function loadLocalGame() {
     try {
         const saved = JSON.parse(localStorage.getItem(LOCAL_GAME_KEY));
-        if (saved && Array.isArray(saved.history)) return { ...createGame(), ...saved };
+        if (saved && Array.isArray(saved.history)) {
+            // 舊版單機存檔：用逐分紀錄補回站位，也保留回復上一分的正確球員。
+            if (typeof saved.flipA !== 'boolean') {
+                let flipA = false;
+                let flipB = false;
+                saved.history.forEach((before, index) => {
+                    before.flipA = flipA;
+                    before.flipB = flipB;
+                    const after = saved.history[index + 1] || saved;
+                    const scorer = after.teamAScore > before.teamAScore ? 'A' : 'B';
+                    if (scorer === before.servingTeam) {
+                        if (scorer === 'A') flipA = !flipA;
+                        else flipB = !flipB;
+                    }
+                });
+                saved.flipA = flipA;
+                saved.flipB = flipB;
+            }
+            return { ...createGame(), ...saved };
+        }
     } catch (error) {
         // 讀不到就當作新比賽
     }
@@ -33,6 +52,37 @@ function loadLocalGame() {
 const RECONNECT_BASE_MS = 2000;
 const RECONNECT_MAX_MS = 10000;
 const LEAVE_DELAY_SECONDS = 3; // 按「離開」前的等待秒數，避免手快誤按
+
+// 發球提示：關閉 / 只標示發球區 / 再加上雙打的「單、雙」球員
+const SERVE_MODES = ['full', 'zone', 'off'];
+const SERVE_MODE_LABEL = { full: '單雙', zone: '區', off: '關' };
+const PLAYER_LABEL = { even: '雙', odd: '單' };
+
+// 隨機先攻動畫：高亮沿著四個發球區順時針跑（左上→右上→右下→左下）
+const ROLL_QUADS = [
+    { side: 'left', half: 'top' },
+    { side: 'right', half: 'top' },
+    { side: 'right', half: 'bottom' },
+    { side: 'left', half: 'bottom' },
+];
+
+function loadServeMode() {
+    try {
+        const saved = localStorage.getItem('serveMode');
+        if (SERVE_MODES.includes(saved)) return saved;
+        if (localStorage.getItem('serveZone') === 'off') return 'off'; // 舊版的開關
+    } catch (error) {
+        // 讀不到就用預設
+    }
+    return 'full';
+}
+
+// 在某一側（left/right）的區塊中，court（右/左發球區）對應到上半或下半
+// 球場俯視、球網在中間：左邊的隊伍面向右，右發球區在下半；右邊的隊伍面向左，右發球區在上半
+const halfForCourt = (side, court) => {
+    if (side === 'left') return court === 'right' ? 'bottom' : 'top';
+    return court === 'right' ? 'top' : 'bottom';
+};
 
 const teamLabel = (team) => (team === 'A' ? '紅方' : '藍方');
 
@@ -77,15 +127,30 @@ function Scoreboard() {
     const [qrUrl, setQrUrl] = useState('');
     const [copied, setCopied] = useState(false);
     const [startBanner, setStartBanner] = useState(null); // 先攻方變動時短暫顯示
-    const [showServeZone, setShowServeZone] = useState(() => localStorage.getItem('serveZone') !== 'off'); // 發球區提示
+    const [serveMode, setServeMode] = useState(loadServeMode); // 發球提示
+    const showServeZone = serveMode !== 'off';
+    const showPlayers = serveMode === 'full';
+    const [rollQuad, setRollQuad] = useState(null); // 隨機先攻動畫中高亮的區塊（0~3），沒在動畫時為 null
+    const [pickingServe, setPickingServe] = useState(false);
+    const [serveError, setServeError] = useState('');
+    const seenRollRef = useRef(null);
+    const rollingRef = useRef(false);
+    const mountedRef = useRef(true);
+
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+        };
+    }, []);
 
     useEffect(() => {
         try {
-            localStorage.setItem('serveZone', showServeZone ? 'on' : 'off');
+            localStorage.setItem('serveMode', serveMode);
         } catch (error) {
             // 忽略
         }
-    }, [showServeZone]);
+    }, [serveMode]);
 
     // 歷史紀錄：把這個房間（或單機）已完成的場次同步到這支手機
     useEffect(() => {
@@ -99,7 +164,7 @@ function Scoreboard() {
         if (!loaded) return;
         const prev = prevRef.current;
         const atZero = game.teamAScore === 0 && game.teamBScore === 0;
-        if (prev.loaded && game.isGameStarted && atZero && game.firstServe
+        if (prev.loaded && game.isGameStarted && atZero && game.firstServe && !rollingRef.current
             && (!prev.started || prev.firstServe !== game.firstServe)) {
             setStartBanner(game.firstServe);
         }
@@ -262,11 +327,17 @@ function Scoreboard() {
 
     // 開局前 0:0 的先攻選擇（含隨機）；隨機的結果用提示顯示，避免結果和原本相同時看不出來
     const chooseFirstServe = async (team, type = 'serve') => {
+        if (rollingRef.current || pickingServe) return;
+        setPickingServe(true);
+        setServeError('');
         const next = await act(type, { firstServe: team });
-        if (next && team === 'random') setStartBanner(next.firstServe);
+        if (!mountedRef.current) return;
+        setPickingServe(false);
+        if (!next) setServeError('先攻設定失敗，請再試一次');
     };
+
     const incrementScore = (team) => {
-        if (gameStarted) act('point', { team });
+        if (gameStarted && !rollingRef.current && !pickingServe) act('point', { team });
     };
     const undoLastAction = () => act('undo');
     // 上一局的勝方先發球
@@ -308,29 +379,71 @@ function Scoreboard() {
     const rightTeam = flipped ? 'A' : 'B';
     const scoreOf = (team) => (team === 'A' ? game.teamAScore : game.teamBScore);
 
-    // 發球區：發球方分數為偶數從右區、奇數從左區發球。
-    // 以球場俯視、球網在中間來看：左邊的隊伍面向右，右發球區在下半；右邊的隊伍面向左，右發球區在上半。
-    const serveHalfOf = (team, side) => {
-        if (game.servingTeam !== team) return null;
-        const isRightCourt = scoreOf(team) % 2 === 0;
-        if (side === 'left') return isRightCourt ? 'bottom' : 'top';
-        return isRightCourt ? 'top' : 'bottom';
-    };
+    // 後端廣播抽籤序號；同一結果連抽兩次、其他裝置觀看時也會播放。
+    useEffect(() => {
+        if (!loaded) return;
+        const roll = game.serveRoll || 0;
+        const previous = seenRollRef.current;
+        seenRollRef.current = roll;
+        if (previous === null || previous === roll || !roll || !game.isGameStarted
+            || game.teamAScore !== 0 || game.teamBScore !== 0) return;
+        rollingRef.current = true;
+        setStartBanner(null);
+        const target = game.firstServe === leftTeam ? 3 : 1;
+        const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+        const steps = reduced ? target : 8 + target;
+        let step = reduced ? target : 0;
+        let timer;
+        const tick = () => {
+            setRollQuad(step % 4);
+            if (step === steps) {
+                timer = setTimeout(() => {
+                    rollingRef.current = false;
+                    setRollQuad(null);
+                    setStartBanner(game.firstServe);
+                }, 450);
+            } else {
+                step++;
+                timer = setTimeout(tick, 55 + step * step * 1.5);
+            }
+        };
+        tick();
+        return () => {
+            clearTimeout(timer);
+            rollingRef.current = false;
+            setRollQuad(null);
+        };
+    }, [loaded, game.serveRoll, game.firstServe, game.isGameStarted, game.teamAScore, game.teamBScore, leftTeam]);
 
-    // 每隊區塊的底層：兩個發球區（發球的那半高亮）與羽球圖示
+    // 發球區：發球方分數為偶數從右區、奇數從左區發球；接發球員站在對角（同一側的發球區）
+    const info = serveInfo(game);
+
+    // 每隊區塊的底層：兩個發球區（發球的那半高亮、接發球的那半淡淡標示）、羽球圖示與雙打的單／雙
     const serveOverlay = (team, side) => {
-        const serving = game.servingTeam === team;
-        const half = showServeZone ? serveHalfOf(team, side) : null;
+        const rolling = rollQuad !== null;
+        const isServer = !!info && info.serverTeam === team;
+        const isReceiver = !!info && info.receiverTeam === team;
+        const half = (isServer || isReceiver) && showServeZone ? halfForCourt(side, info.court) : null;
+        const rollHalf = rolling && ROLL_QUADS[rollQuad].side === side ? ROLL_QUADS[rollQuad].half : null;
+        const activeHalf = rolling ? rollHalf : (isServer ? half : null);
+        const receiveHalf = !rolling && isReceiver ? half : null;
+        const cls = (h) => `serve-half ${activeHalf === h ? 'active' : ''} ${receiveHalf === h ? 'receive' : ''}`;
+        const showIcon = isServer && !rolling;
         return (
             <>
-                {showServeZone && (
+                {(showServeZone || rolling) && (
                     <div className="serve-halves">
-                        <div className={`serve-half ${half === 'top' ? 'active' : ''}`} />
-                        <div className={`serve-half ${half === 'bottom' ? 'active' : ''}`} />
+                        <div className={cls('top')} />
+                        <div className={cls('bottom')} />
                     </div>
                 )}
-                {serving && (
+                {showIcon && (
                     <div className={`serve-icon ${half ? `in-${half} on-${side}` : 'plain'}`} />
+                )}
+                {!rolling && showPlayers && half && (
+                    <div className={`serve-player ${isServer ? 'is-server' : 'is-receiver'} in-${half} on-${side}`}>
+                        {isServer ? '發球' : '接發'}・{PLAYER_LABEL[isServer ? info.serverPlayer : info.receiverPlayer]}
+                    </div>
                 )}
             </>
         );
@@ -380,7 +493,7 @@ function Scoreboard() {
         )
     }
 
-    // 0:0 且還沒得分時，可以直接在這裡改先攻方或骰先攻
+    // 先攻選擇放在頂列，得分後隱藏。
     const canPickServe = gameStarted && game.teamAScore === 0 && game.teamBScore === 0 && !game.canUndo;
     const servePicker = canPickServe && (
         <div className="serve-picker">
@@ -390,49 +503,53 @@ function Scoreboard() {
                     key={team}
                     className={`pick-${team === 'A' ? 'a' : 'b'} ${firstServe === team ? 'on' : ''}`}
                     onClick={() => chooseFirstServe(team)}
+                    disabled={rollQuad !== null || pickingServe}
                 >
                     {teamLabel(team)}
                 </button>
             ))}
-            <button className="pick-random" onClick={() => chooseFirstServe('random')}>🎲 隨機</button>
+            <button className="pick-random" onClick={() => chooseFirstServe('random')} disabled={rollQuad !== null || pickingServe}>🎲 {rollQuad !== null ? '抽籤中' : '隨機'}</button>
         </div>
     );
 
     // 頁面:下方按鈕
     const bottomButton = (
         <>
-            {servePicker}
             <div className="bottomButtons">
-                <button className="mirror-button" onClick={mirrorTeams}>鏡射</button>
-                <button className="swap-button" onClick={swapTeams}>互換</button>
-                <button className={showServeZone ? '' : 'toggle-off'} onClick={() => setShowServeZone(!showServeZone)}>發球區{showServeZone ? '' : ' ✕'}</button>
+                <button className="mirror-button" onClick={mirrorTeams} disabled={rollQuad !== null || pickingServe}>鏡射</button>
+                <button className="swap-button" onClick={swapTeams} disabled={rollQuad !== null || pickingServe}>互換</button>
+                <button
+                    className={showServeZone ? '' : 'toggle-off'}
+                    onClick={() => setServeMode(SERVE_MODES[(SERVE_MODES.indexOf(serveMode) + 1) % SERVE_MODES.length])}
+                >
+                    提示：{SERVE_MODE_LABEL[serveMode]}
+                </button>
                 <button onClick={() => setShowRecords(true)}>紀錄</button>
-                <button onClick={resetScores}>重置</button>
+                <button onClick={resetScores} disabled={rollQuad !== null || pickingServe}>重置</button>
             </div>
         </>
     );
 
     // 頁面:上方按鈕
     const topButton = (
-        <>
+        <header className="scoreboard-header">
             <button className="back-button" onClick={() => setShowLeave(true)}>
                 返回
             </button>
+            <h1 className="scoreboard-title">{isOnline ? `房間 ${roomKey}` : '單機計分'}</h1>
             <div className="top-right-buttons">
+                {servePicker}
                 {isOnline && (
                     <button className="share-button" onClick={() => setShowShare(true)}>
                         分享
                     </button>
                 )}
-                <button className="undo-button" onClick={undoLastAction} disabled={!game.canUndo}>
+                <button className="undo-button" onClick={undoLastAction} disabled={!game.canUndo || rollQuad !== null || pickingServe}>
                     回復
                 </button>
             </div>
 
-            <h1 className="scoreboard-title">
-                {isOnline ? `(房間: ${roomKey})` : ''}
-            </h1>
-        </>
+        </header>
     );
 
     // 離開確認（取代原本的「返回」頁面）
@@ -593,7 +710,10 @@ function Scoreboard() {
 
     // 先攻方提示
     const startBannerBox = startBanner && (
-        <div className="start-banner">先攻：{teamLabel(startBanner)}</div>
+        <div className="start-banner" role="status">
+            先攻：{teamLabel(startBanner)}
+            {showPlayers && <small>開局站右邊的是「雙」，站左邊的是「單」</small>}
+        </div>
     );
 
     // 渲染
@@ -619,6 +739,7 @@ function Scoreboard() {
 
             {/* 上方按鈕 */}
             {topButton}
+            {serveError && <div className="error-message" role="alert">{serveError}</div>}
 
             {/* 主要計分頁面 */}
             {mainPage}
