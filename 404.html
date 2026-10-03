@@ -1,11 +1,10 @@
-<!DOCTYPE html>
-<html lang="zh-Hant">
-<head>
-  <meta charset="utf-8" />
-  <title>SynScore</title>
-  <!-- GitHub Pages 不支援前端路由：直接開 /SynScore/scoreboard 或重新整理時，導回首頁 -->
-  <meta http-equiv="refresh" content="0; url=/SynScore/" />
-  <script>location.replace('/SynScore/' + location.search);</script>
-</head>
-<body></body>
-</html>
+<!doctype html>
+<html lang="zh-Hant"><meta charset="utf-8"><title>SynScore</title>
+<script>
+  // GitHub Pages project-site fallback; preserves the route and invitation query.
+  const root = '/SynScore/';
+  if (location.pathname.startsWith(root)) {
+    const route = '/' + location.pathname.slice(root.length) + location.search + location.hash;
+    location.replace(root + '?route=' + encodeURIComponent(route));
+  }
+</script><p>正在返回 SynScore… <a href="/SynScore/">回首頁</a></p></html>

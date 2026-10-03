@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title"><title id="title">楊桃</title><defs><linearGradient id="bg" x1="0" y1="0" x2="0.8" y2="1"><stop stop-color="#FFFFFF"/><stop offset="1" stop-color="#F4F5CD"/></linearGradient><linearGradient id="rim" x1="0" y1="0" x2="0.7" y2="1"><stop stop-color="#F4F5CD"/><stop offset="1" stop-color="#C7CC46" stop-opacity="0.38"/></linearGradient><linearGradient id="leaf" x1="0" y1="0" x2="0.8" y2="1"><stop stop-color="#8DBB51"/><stop offset="1" stop-color="#317450"/></linearGradient><linearGradient id="f" x1="0.15" y1="0" x2="0.85" y2="1"><stop stop-color="#E2E68A"/><stop offset="1" stop-color="#B4C044"/></linearGradient></defs><circle cx="128" cy="128" r="119" fill="url(#rim)"/><circle cx="128" cy="127" r="113" fill="url(#bg)"/><path d="M39 100A94 94 0 0 1 160 38" fill="none" stroke="#FFF" stroke-width="3" stroke-linecap="round" opacity="0.85"/><ellipse cx="129" cy="210" rx="55" ry="6" fill="#6F6250" opacity="0.12"/>
+<g transform="rotate(-29 115 134)">
+<path d="M113 71 Q111 60 117 56" fill="none" stroke="#766044" stroke-width="5" stroke-linecap="round"/>
+<!-- Long, fleshy wings give the whole carambola its characteristic ridged profile. -->
+<path d="M114 70 C103 77 94 78 88 91 C80 108 79 147 86 172 C91 188 104 200 115 202 C130 193 143 177 145 154 C149 127 143 96 135 84 C130 77 120 77 114 70Z" fill="#A8B747"/>
+<path d="M114 70 C106 90 97 121 99 153 C101 176 109 191 115 202 C99 190 88 177 84 157 C79 131 82 104 88 91 C95 80 106 76 114 70Z" fill="#D9DF6D"/>
+<path d="M114 70 C127 83 139 106 141 131 C143 160 130 188 115 202 C121 174 122 153 120 131 C118 109 115 89 114 70Z" fill="#BBC650"/>
+<path d="M114 70 C104 92 98 117 100 143 C100 167 108 188 115 202 C126 176 129 152 126 128 C124 104 119 81 114 70Z" fill="#E9E98A"/>
+<path d="M114 78 C108 101 105 118 106 139 C106 160 111 179 114 189" fill="none" stroke="#FFFBC2" stroke-width="4" stroke-linecap="round" opacity=".7"/>
+<path d="M90 99 C84 123 87 157 99 178" fill="none" stroke="#EEF0A0" stroke-width="3" stroke-linecap="round" opacity=".65"/>
+</g>
+<!-- A thick five-point cross-section makes the fruit immediately identifiable. -->
+<path d="M161 134 Q163 130 165 135 L174 155 L196 158 Q202 159 197 164 L181 180 L184 202 Q185 208 180 205 L161 194 L141 205 Q136 208 138 202 L142 180 L125 164 Q121 160 127 158 L149 155Z" fill="#AAB84C" transform="translate(0 5)"/>
+<path d="M161 134 Q163 130 165 135 L174 155 L196 158 Q202 159 197 164 L181 180 L184 202 Q185 208 180 205 L161 194 L141 205 Q136 208 138 202 L142 180 L125 164 Q121 160 127 158 L149 155Z" fill="#F0EE9B" stroke="#CAD46A" stroke-width="2.5" stroke-linejoin="round"/>
+<path d="M163 143 L162 174 L189 162 M162 174 L177 195 M162 174 L146 195 M162 174 L134 163" fill="none" stroke="#D6DB7C" stroke-width="2" stroke-linecap="round"/>
+<ellipse cx="156" cy="173" rx="2.3" ry="4.4" transform="rotate(-30 156 173)" fill="#AB9953"/>
+<ellipse cx="166" cy="181" rx="2.1" ry="4" transform="rotate(35 166 181)" fill="#AB9953"/>
+</svg>
