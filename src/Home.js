@@ -6,6 +6,8 @@ import './Home.css';
 function Home() {
     const [showOnlineOptions, setShowOnlineOptions] = useState(false);
     const [roomKey, setRoomKey] = useState('');
+    const [showJoinInput, setShowJoinInput] = useState(false); // 按「加入房間」後才出現輸入框
+    const [joining, setJoining] = useState(false);
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const handledLink = useRef(false);
@@ -52,6 +54,8 @@ function Home() {
             alert('請輸入有效的 5 碼數字房間金鑰！');
             return;
         }
+        if (joining) return;
+        setJoining(true);
         try {
             const response = await fetch(`${API_BASE}/api/room-state?room=${key}`);
             if (!response.ok) {
@@ -61,10 +65,17 @@ function Home() {
         } catch (error) {
             console.error('Error joining room:', error);
             alert('無法加入房間，請確認房間金鑰是否正確（房間閒置太久會被關閉）！');
+        } finally {
+            setJoining(false);
         }
     };
 
-    const handleJoinRoom = () => joinRoom(roomKey);
+    // 只留數字；輸滿 5 碼就自動加入，不用再按按鈕
+    const handleRoomKeyChange = (e) => {
+        const digits = e.target.value.replace(/\D/g, '').slice(0, 5);
+        setRoomKey(digits);
+        if (digits.length === 5) joinRoom(digits);
+    };
 
     // 羽球選擇頁面
     let badmintonPage;
@@ -73,20 +84,31 @@ function Home() {
             <>
                 <div className="online-options">
                     <button onClick={handleCreateRoom}>創建房間</button>
-                    <div className="join-room">
-                        <input
-                            type="text"
-                            placeholder="輸入 5 碼房間金鑰"
-                            value={roomKey}
-                            onChange={(e) => setRoomKey(e.target.value)}
-                            maxLength={5}
-                        />
-                        <button onClick={handleJoinRoom}>加入房間</button>
-                    </div>
+                    {showJoinInput ? (
+                        <div className="join-room">
+                            <input
+                                type="text"
+                                inputMode="numeric"
+                                autoComplete="off"
+                                autoFocus
+                                placeholder="輸入 5 碼房號"
+                                value={roomKey}
+                                onChange={handleRoomKeyChange}
+                                onKeyDown={(e) => e.key === 'Enter' && joinRoom(roomKey)}
+                                maxLength={5}
+                            />
+                            <div className="join-actions">
+                                <button onClick={() => joinRoom(roomKey)} disabled={joining}>加入</button>
+                                <button className="secondary" onClick={() => { setShowJoinInput(false); setRoomKey(''); }}>取消</button>
+                            </div>
+                        </div>
+                    ) : (
+                        <button onClick={() => setShowJoinInput(true)}>加入房間</button>
+                    )}
                 </div>
 
                 <button onClick={handleSinglePlayer}>單機計分</button>
-                <button onClick={() => navigate('/history')}>歷史紀錄</button>
+                <button className="link-button" onClick={() => navigate('/history')}>所有歷史紀錄</button>
             </>
         )
     }

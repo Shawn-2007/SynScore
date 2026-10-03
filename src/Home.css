@@ -65,3 +65,23 @@
         width: 150px;
     }
 }
+.join-actions {
+    display: flex;
+}
+
+.home button.secondary {
+    background-color: #888;
+}
+
+.home button.link-button {
+    background: transparent;
+    color: #555;
+    text-decoration: underline;
+    font-size: 0.9em;
+    padding: 4px 8px;
+}
+
+.home button.link-button:hover {
+    background: transparent;
+    color: #222;
+}

@@ -54,6 +54,19 @@ function startGame(game, team, now = Date.now(), random = Math.random) {
     };
 }
 
+// 開局後、第一分之前（0:0）可以改先攻方；team 可為 'A' | 'B' | 'random'
+function setFirstServe(game, team, random = Math.random) {
+    if (!game.isGameStarted || game.history.length > 0) return game;
+    if (team === 'random') team = random() < 0.5 ? 'A' : 'B';
+    return {
+        ...game,
+        servingTeam: team,
+        firstServe: team,
+        consecutiveA: team === 'A' ? 2 : 1,
+        consecutiveB: team === 'B' ? 2 : 1,
+    };
+}
+
 function applyPoint(game, team, now = Date.now()) {
     if (!game.isGameStarted) return game;
 
@@ -114,9 +127,14 @@ function undo(game) {
     };
 }
 
-// 重置：放棄目前這一局，保留左右互換設定與已完成的歷史場次
+// 全新的一局（0:0 直接開始）：保留左右互換設定與已完成的歷史場次
+function newGame(game, firstServe = 'A', now = Date.now()) {
+    return startGame({ ...createGame(), swapTeams: game.swapTeams, results: game.results }, firstServe, now);
+}
+
+// 重置：放棄目前這一局，從 0:0 重新開始（沿用原本的先攻方）
 function resetGame(game) {
-    return { ...createGame(), swapTeams: game.swapTeams, results: game.results };
+    return newGame(game, game.firstServe || 'A');
 }
 
 function setSwap(game, swapTeams) {
@@ -134,6 +152,8 @@ module.exports = {
     checkWinner,
     createGame,
     startGame,
+    newGame,
+    setFirstServe,
     applyPoint,
     undo,
     resetGame,

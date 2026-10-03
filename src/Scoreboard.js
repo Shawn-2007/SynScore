@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo, useId } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { API_BASE, WS_BASE, postAction } from './config';
+import { WS_BASE, postAction } from './config';
 import QRCode from 'qrcode';
-import { createGame, startGame, applyPoint, undo, resetGame, setSwap, toView } from './rules';
+import { createGame, newGame, startGame, setFirstServe, applyPoint, undo, resetGame, setSwap, toView } from './rules';
 import { syncResults } from './historyStore';
+import { ResultItem } from './ResultList';
 import './Scoreboard.css';
 
 // 單機模式用同一套規則在本地執行；線上模式則由後端判定，這裡只送出操作
@@ -11,6 +12,7 @@ const localReducers = {
     point: (game, { team }) => applyPoint(game, team),
     undo: (game) => undo(game),
     start: (game, { firstServe }) => startGame(game, firstServe),
+    serve: (game, { firstServe }) => setFirstServe(game, firstServe),
     reset: (game) => resetGame(game),
     swap: (game, { swapTeams }) => setSwap(game, swapTeams),
 };
@@ -21,15 +23,18 @@ const LOCAL_GAME_KEY = 'synscore-local-game';
 function loadLocalGame() {
     try {
         const saved = JSON.parse(localStorage.getItem(LOCAL_GAME_KEY));
-        if (saved && Array.isArray(saved.history)) return saved;
+        if (saved && Array.isArray(saved.history)) return { ...createGame(), ...saved };
     } catch (error) {
         // 讀不到就當作新比賽
     }
-    return createGame();
+    return newGame(createGame(), 'A');
 }
 
 const RECONNECT_BASE_MS = 2000;
 const RECONNECT_MAX_MS = 10000;
+const LEAVE_DELAY_SECONDS = 3; // 按「離開」前的等待秒數，避免手快誤按
+
+const teamLabel = (team) => (team === 'A' ? '紅方' : '藍方');
 
 function Crown({ className }) {
     const gradientId = useId();
@@ -57,26 +62,22 @@ function Scoreboard() {
 
     // 比賽狀態（線上：來自後端；單機：本地）
     const [rawGame, setRawGame] = useState(() => (isOnline ? createGame() : loadLocalGame()));
+    const rawRef = useRef(rawGame); // 單機連續操作時取得最新狀態
+    rawRef.current = rawGame;
     const game = toView(rawGame);
     const versionRef = useRef(-1); // 忽略比目前更舊的後端更新
+    const [loaded, setLoaded] = useState(!isOnline); // 線上：收到第一份房間狀態前顯示「連線中」
 
     const [isSwapped, setIsSwapped] = useState(false); // 鏡像（僅本機）
-    const [showSettings, setShowSettings] = useState(false); // 按鈕:設定
-    const [joinRoomKey, setJoinRoomKey] = useState(''); // 加入房間鑰匙
-    const [errorMessage, setErrorMessage] = useState('');
-    const [theme, setTheme] = useState(localStorage.getItem('theme') || 'theme-a'); // 外觀
-    const [showBackOverlay, setShowBackOverlay] = useState(false); // 返回上一頁
+    const [theme] = useState(localStorage.getItem('theme') || 'theme-a'); // 外觀
+    const [showLeave, setShowLeave] = useState(false); // 離開確認
+    const [leaveCountdown, setLeaveCountdown] = useState(0);
+    const [showRecords, setShowRecords] = useState(false); // 本房間紀錄
     const [showShare, setShowShare] = useState(false); // 分享房間（連結 / QR code）
     const [qrUrl, setQrUrl] = useState('');
     const [copied, setCopied] = useState(false);
-    const [pickNext, setPickNext] = useState(false); // 結算後進入「選擇先攻」
-    const [startBanner, setStartBanner] = useState(null); // 新局開始時短暫顯示先攻方
+    const [startBanner, setStartBanner] = useState(null); // 先攻方變動時短暫顯示
     const [showServeZone, setShowServeZone] = useState(() => localStorage.getItem('serveZone') !== 'off'); // 發球區提示
-
-    // 把外觀存到localStorage
-    useEffect(() => {
-        localStorage.setItem('theme', theme);
-    }, [theme]);
 
     useEffect(() => {
         try {
@@ -92,23 +93,34 @@ function Scoreboard() {
         syncResults(isOnline ? `room-${roomKey}-${game.roomCreatedAt}` : 'local', game.results);
     }, [isOnline, roomKey, game.roomCreatedAt, game.results]);
 
-    // 新局開始：收起選擇畫面，並顯示先攻方（隨機時才看得出結果）
-    const wasStartedRef = useRef(false);
+    // 其他人開新局、更改先攻方時，也讓這一端看到先攻方
+    const prevRef = useRef({ loaded: false, started: false, firstServe: null });
     useEffect(() => {
-        if (game.isGameStarted && !wasStartedRef.current) {
-            setPickNext(false);
-            if (game.teamAScore === 0 && game.teamBScore === 0 && game.firstServe) {
-                setStartBanner(game.firstServe);
-            }
+        if (!loaded) return;
+        const prev = prevRef.current;
+        const atZero = game.teamAScore === 0 && game.teamBScore === 0;
+        if (prev.loaded && game.isGameStarted && atZero && game.firstServe
+            && (!prev.started || prev.firstServe !== game.firstServe)) {
+            setStartBanner(game.firstServe);
         }
-        wasStartedRef.current = game.isGameStarted;
-    }, [game.isGameStarted, game.teamAScore, game.teamBScore, game.firstServe]);
+        prevRef.current = { loaded: true, started: game.isGameStarted, firstServe: game.firstServe };
+    }, [loaded, game.isGameStarted, game.teamAScore, game.teamBScore, game.firstServe]);
 
     useEffect(() => {
         if (!startBanner) return;
         const timer = setTimeout(() => setStartBanner(null), 2500);
         return () => clearTimeout(timer);
     }, [startBanner]);
+
+    // 離開確認：倒數幾秒後才能按「離開」
+    useEffect(() => {
+        if (!showLeave) return;
+        setLeaveCountdown(LEAVE_DELAY_SECONDS);
+        const timer = setInterval(() => {
+            setLeaveCountdown((n) => (n > 0 ? n - 1 : 0));
+        }, 1000);
+        return () => clearInterval(timer);
+    }, [showLeave]);
 
     // 產生分享用的 QR code
     const shareUrl = isOnline ? `${window.location.origin}${process.env.PUBLIC_URL || ''}/?room=${roomKey}` : '';
@@ -164,6 +176,7 @@ function Scoreboard() {
             versionRef.current = data.version;
         }
         setRawGame(data);
+        setLoaded(true);
     };
 
     // WebSocket 連線
@@ -171,6 +184,7 @@ function Scoreboard() {
         if (!isOnline) return;
 
         setRawGame(createGame());
+        setLoaded(false);
         versionRef.current = -1;
 
         let ws;
@@ -225,27 +239,38 @@ function Scoreboard() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOnline, roomKey]);
 
-    // 執行操作：線上送給後端，單機直接在本地套用規則
+    // 執行操作：線上送給後端，單機直接在本地套用規則。回傳最新狀態（失敗時為 null）
     const act = async (type, payload = {}) => {
         if (!isOnline) {
-            setRawGame((prev) => localReducers[type](prev, payload));
-            return;
+            const next = localReducers[type](rawRef.current, payload);
+            rawRef.current = next;
+            setRawGame(next);
+            return toView(next);
         }
         try {
-            applyRemote(await postAction(type, { roomKey, ...payload }));
+            const data = await postAction(type, { roomKey, ...payload });
+            applyRemote(data);
+            return data;
         } catch (error) {
             console.error(`Error sending ${type}:`, error);
+            return null;
         }
     };
 
     const gameStarted = game.isGameStarted;
     const { winner, firstServe } = game;
 
-    const selectFirstServe = (team) => act('start', { firstServe: team });
+    // 開局前 0:0 的先攻選擇（含隨機）；隨機的結果用提示顯示，避免結果和原本相同時看不出來
+    const chooseFirstServe = async (team, type = 'serve') => {
+        const next = await act(type, { firstServe: team });
+        if (next && team === 'random') setStartBanner(next.firstServe);
+    };
     const incrementScore = (team) => {
         if (gameStarted) act('point', { team });
     };
     const undoLastAction = () => act('undo');
+    // 上一局的勝方先發球
+    const nextGame = () => chooseFirstServe(winner, 'start');
 
     const copyShareLink = async () => {
         try {
@@ -267,76 +292,10 @@ function Scoreboard() {
     };
     const swapTeams = () => act('swap', { swapTeams: !game.swapTeams });
 
-    // 按鈕:設定
-    const toggleSettings = () => {
-        setShowSettings(!showSettings);
-        setErrorMessage('');
-    };
-
-    // 按鈕:返回上一頁
-    const toggleBackOverlay = () => {
-        setShowBackOverlay(!showBackOverlay);
-        setErrorMessage('');
-    };
-
-    // 按鈕:返回首頁
-    const handleBackToHome = () => {
+    // 離開
+    const handleLeave = () => {
+        setShowLeave(false);
         navigate('/');
-        setShowBackOverlay(false);
-    };
-
-    // 按鈕:創建房間
-    const handleCreateRoom = async () => {
-        try {
-            const response = await fetch(`${API_BASE}/api/create-room`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-            });
-
-            if (!response.ok) {
-                throw new Error(`Failed to create room: ${response.status} ${response.statusText}`);
-            }
-
-            const data = await response.json();
-            if (!data.roomKey) {
-                throw new Error('No roomKey returned from server');
-            }
-
-            setShowBackOverlay(false);
-            navigate('/scoreboard', { state: { mode: 'online', roomKey: data.roomKey } });
-        } catch (error) {
-            console.error('Error in handleCreateRoom:', error);
-            setErrorMessage('無法創建房間，請稍後再試！');
-        }
-    };
-
-    // 按鈕:加入房間
-    const handleJoinRoom = async () => {
-        if (joinRoomKey.length !== 5 || !/^\d+$/.test(joinRoomKey)) {
-            setErrorMessage('請輸入有效的 5 碼數字房間金鑰！');
-            return;
-        }
-
-        try {
-            const response = await fetch(`${API_BASE}/api/room-state?room=${joinRoomKey}`);
-            if (!response.ok) {
-                throw new Error(`Room does not exist or inaccessible: ${response.status}`);
-            }
-
-            setShowBackOverlay(false);
-            navigate('/scoreboard', { state: { mode: 'online', roomKey: joinRoomKey } });
-            setErrorMessage('');
-        } catch (error) {
-            console.error('Error in handleJoinRoom:', error);
-            setErrorMessage('無法加入房間，請確認房間金鑰是否正確！');
-        }
-    };
-
-    // 按鈕:外觀修改
-    const handleThemeChange = (newTheme) => {
-        setTheme(newTheme);
     };
 
     // 鏡像
@@ -348,9 +307,34 @@ function Scoreboard() {
     const leftTeam = flipped ? 'B' : 'A';
     const rightTeam = flipped ? 'A' : 'B';
     const scoreOf = (team) => (team === 'A' ? game.teamAScore : game.teamBScore);
-    // 發球區：發球方分數為偶數從右區、奇數從左區發球
-    const serveZoneOf = (team) => (game.servingTeam === team ? (scoreOf(team) % 2 === 0 ? '右' : '左') : null);
-    const hasServeMark = (team) => (team === 'A' ? game.consecutiveA : game.consecutiveB) >= 2;
+
+    // 發球區：發球方分數為偶數從右區、奇數從左區發球。
+    // 以球場俯視、球網在中間來看：左邊的隊伍面向右，右發球區在下半；右邊的隊伍面向左，右發球區在上半。
+    const serveHalfOf = (team, side) => {
+        if (game.servingTeam !== team) return null;
+        const isRightCourt = scoreOf(team) % 2 === 0;
+        if (side === 'left') return isRightCourt ? 'bottom' : 'top';
+        return isRightCourt ? 'top' : 'bottom';
+    };
+
+    // 每隊區塊的底層：兩個發球區（發球的那半高亮）與羽球圖示
+    const serveOverlay = (team, side) => {
+        const serving = game.servingTeam === team;
+        const half = showServeZone ? serveHalfOf(team, side) : null;
+        return (
+            <>
+                {showServeZone && (
+                    <div className="serve-halves">
+                        <div className={`serve-half ${half === 'top' ? 'active' : ''}`} />
+                        <div className={`serve-half ${half === 'bottom' ? 'active' : ''}`} />
+                    </div>
+                )}
+                {serving && (
+                    <div className={`serve-icon ${half ? `in-${half} on-${side}` : 'plain'}`} />
+                )}
+            </>
+        );
+    };
 
     // 彩帶位置只隨機一次，避免每次重新渲染都閃動
     const confettiPieces = useMemo(
@@ -374,51 +358,55 @@ function Scoreboard() {
                         className={`team team-left ${leftTeam === 'A' ? 'team-a' : 'team-b'}`}
                         onClick={() => incrementScore(leftTeam)}
                     >
-                        {showServeZone && serveZoneOf(leftTeam) && <span className="serve-zone">發球 {serveZoneOf(leftTeam)}區</span>}
+                        {serveOverlay(leftTeam, 'left')}
                         <h2>隊伍 {leftTeam}</h2>
                         <p className={`score-text score-medium`}>
                             {scoreOf(leftTeam)}
                         </p>
-                        <div className="consecutive-serve-container">
-                            <div
-                                className={`consecutive-serve ${leftTeam === 'A' ? 'team-a-serve' : 'team-b-serve'}`}
-                                style={{ display: hasServeMark(leftTeam) ? 'block' : 'none' }}
-                            >
-                                {/* 連發 */}
-                            </div>
-                        </div>
                     </div>
 
                     <div
                         className={`team team-right ${rightTeam === 'A' ? 'team-a' : 'team-b'}`}
                         onClick={() => incrementScore(rightTeam)}
                     >
-                        {showServeZone && serveZoneOf(rightTeam) && <span className="serve-zone">發球 {serveZoneOf(rightTeam)}區</span>}
+                        {serveOverlay(rightTeam, 'right')}
                         <h2>隊伍 {rightTeam}</h2>
                         <p className={`score-text score-medium`}>
                             {scoreOf(rightTeam)}
                         </p>
-                        <div className="consecutive-serve-container">
-                            <div
-                                className={`consecutive-serve `}
-                                style={{ display: hasServeMark(rightTeam) ? 'block' : 'none' }}
-                            >
-                                {/* 連發 */}
-                            </div>
-                        </div>
                     </div>
                 </div>
             </>
         )
     }
 
+    // 0:0 且還沒得分時，可以直接在這裡改先攻方或骰先攻
+    const canPickServe = gameStarted && game.teamAScore === 0 && game.teamBScore === 0 && !game.canUndo;
+    const servePicker = canPickServe && (
+        <div className="serve-picker">
+            <span className="serve-picker-label">先攻</span>
+            {[leftTeam, rightTeam].map((team) => (
+                <button
+                    key={team}
+                    className={`pick-${team === 'A' ? 'a' : 'b'} ${firstServe === team ? 'on' : ''}`}
+                    onClick={() => chooseFirstServe(team)}
+                >
+                    {teamLabel(team)}
+                </button>
+            ))}
+            <button className="pick-random" onClick={() => chooseFirstServe('random')}>🎲 隨機</button>
+        </div>
+    );
+
     // 頁面:下方按鈕
     const bottomButton = (
         <>
+            {servePicker}
             <div className="bottomButtons">
                 <button className="mirror-button" onClick={mirrorTeams}>鏡射</button>
                 <button className="swap-button" onClick={swapTeams}>互換</button>
-                <button className={showServeZone ? '' : 'toggle-off'} onClick={() => setShowServeZone(!showServeZone)}>發球區{showServeZone ? '：開' : '：關'}</button>
+                <button className={showServeZone ? '' : 'toggle-off'} onClick={() => setShowServeZone(!showServeZone)}>發球區{showServeZone ? '' : ' ✕'}</button>
+                <button onClick={() => setShowRecords(true)}>紀錄</button>
                 <button onClick={resetScores}>重置</button>
             </div>
         </>
@@ -427,7 +415,7 @@ function Scoreboard() {
     // 頁面:上方按鈕
     const topButton = (
         <>
-            <button className="back-button" onClick={toggleBackOverlay}>
+            <button className="back-button" onClick={() => setShowLeave(true)}>
                 返回
             </button>
             <div className="top-right-buttons">
@@ -439,9 +427,6 @@ function Scoreboard() {
                 <button className="undo-button" onClick={undoLastAction} disabled={!game.canUndo}>
                     回復
                 </button>
-                {/* <button className="settings-button" onClick={toggleSettings}>
-                    設定
-                </button> */}
             </div>
 
             <h1 className="scoreboard-title">
@@ -450,76 +435,58 @@ function Scoreboard() {
         </>
     );
 
-    // 頁面:上一頁
-    let previousPage;
-    if (showBackOverlay) {
-        previousPage = (
-            <>
-                <div className="back-overlay">
-                    <div className="back-panel">
-                        <button className="back-home-button" onClick={handleBackToHome}>
-                            返回首頁
-                        </button>
-                        <button className="close-back-overlay" onClick={toggleBackOverlay}>
-                            返回記分板
-                        </button>
-
-                        <h1>羽球計分系統</h1>
-                        <div className="online-options">
-                            <button onClick={handleCreateRoom}>創建房間</button>
-                            <div className="join-room">
-                                <input
-                                    type="text"
-                                    placeholder="輸入 5 碼房間金鑰"
-                                    value={joinRoomKey}
-                                    onChange={(e) => {
-                                        setJoinRoomKey(e.target.value);
-                                        setErrorMessage('');
-                                    }}
-                                    maxLength={5}
-                                />
-                                <button onClick={handleJoinRoom}>加入房間</button>
-                            </div>
-                            {errorMessage && <p className="error-message">{errorMessage}</p>}
-                        </div>
-                    </div>
+    // 離開確認（取代原本的「返回」頁面）
+    let leavePage;
+    if (showLeave) {
+        leavePage = (
+            <div className="leave-overlay" onClick={() => setShowLeave(false)}>
+                <div className="leave-box" onClick={(e) => e.stopPropagation()}>
+                    <h2>離開比賽？</h2>
+                    <p>
+                        {isOnline
+                            ? `比賽不會結束。房間 ${roomKey} 會保留約 2 小時，之後可以用房號或分享連結再回來。`
+                            : '目前的比分已自動儲存，下次進入「單機計分」會接著打。'}
+                    </p>
+                    <button className="leave-cancel" onClick={() => setShowLeave(false)}>
+                        繼續比賽
+                    </button>
+                    <button className="leave-confirm" onClick={handleLeave} disabled={leaveCountdown > 0}>
+                        {leaveCountdown > 0 ? `離開（${leaveCountdown}）` : '離開'}
+                    </button>
                 </div>
-            </>
-        )
+            </div>
+        );
     }
 
-    // 頁面:設定頁面
-    let settingsPage;
-    if (showSettings) {
-        settingsPage = (
-            <>
-                <div className="settings-overlay">
-                    <div className="settings-panel">
-                        <h2>設定</h2>
-                        <div className="settings-options">
-                            <div className="theme-options">
-                                <h3>切換外觀</h3>
-                                <button
-                                    className={theme === 'theme-a' ? 'active' : ''}
-                                    onClick={() => handleThemeChange('theme-a')}
-                                >
-                                    外觀 A
-                                </button>
-                                <button
-                                    className={theme === 'theme-b' ? 'active' : ''}
-                                    onClick={() => handleThemeChange('theme-b')}
-                                >
-                                    外觀 B
-                                </button>
-                            </div>
-                        </div>
-                        <button className="close-settings" onClick={toggleSettings}>
-                            關閉
-                        </button>
+    // 本房間（或單機）的紀錄
+    let recordsPage;
+    if (showRecords) {
+        const wins = { A: 0, B: 0 };
+        game.results.forEach((r) => {
+            wins[r.winner] += 1;
+        });
+        recordsPage = (
+            <div className="back-overlay">
+                <div className="records-panel">
+                    <h1>{isOnline ? `房間 ${roomKey} 的紀錄` : '單機紀錄'}</h1>
+                    <p className="records-tally">
+                        <span className="team-a-text">紅方 {wins.A} 勝</span>
+                        <span> ・ </span>
+                        <span className="team-b-text">藍方 {wins.B} 勝</span>
+                    </p>
+                    <div className="records-list">
+                        {game.results.length === 0 && <p className="history-empty">還沒有打完的比賽。</p>}
+                        {[...game.results].reverse().map((r) => (
+                            <ResultItem key={r.endedAt} result={r} />
+                        ))}
+                    </div>
+                    <div className="share-actions">
+                        <button className="plain-button" onClick={() => navigate('/history')}>所有歷史紀錄</button>
+                        <button onClick={() => setShowRecords(false)}>關閉</button>
                     </div>
                 </div>
-            </>
-        )
+            </div>
+        );
     }
 
     // 特效頁面:灑彩帶
@@ -533,47 +500,31 @@ function Scoreboard() {
         </>
     );
 
-    // 選擇先攻隊伍的按鈕（依左右位置排列）
-    const serveButton = (team) => (
-        <button
-            key={team}
-            className={`serve-button ${team === 'A' ? 'team-a' : 'team-b'}`}
-            onClick={() => selectFirstServe(team)}
-        >
-            {team === 'A' ? '紅方先攻' : '藍方先攻'}
-        </button>
-    );
-
-    // 選擇先攻：指定一方，或隨機決定
-    const serveChooser = (
-        <>
-            <div className="serve-choose-text">
-                <h2>選擇先攻隊伍</h2>
-            </div>
-            <div className="serve-buttons">
-                {serveButton(leftTeam)}
-                {serveButton(rightTeam)}
-            </div>
-            <div className="serve-buttons">
-                <button className="serve-button random" onClick={() => selectFirstServe('random')}>
-                    🎲 隨機決定
-                </button>
-            </div>
-        </>
-    );
-
-    // 首次選擇先攻隊伍，或結算後按「再來一局」
+    // 尚未開局（舊資料或未知狀態）時的先攻選擇；正常流程是直接開局
     let firstSelectPage;
-    if (!gameStarted && ((!winner && firstServe === null) || pickNext)) {
+    if (loaded && !gameStarted && !winner) {
         firstSelectPage = (
             <>
                 <div className="select-serve">
-                    {serveChooser}
-                    {pickNext && winner && (
-                        <button className="plain-button" onClick={() => setPickNext(false)}>
-                            ← 返回結算
+                    <div className="serve-choose-text">
+                        <h2>選擇先攻隊伍</h2>
+                    </div>
+                    <div className="serve-buttons">
+                        {[leftTeam, rightTeam].map((team) => (
+                            <button
+                                key={team}
+                                className={`serve-button ${team === 'A' ? 'team-a' : 'team-b'}`}
+                                onClick={() => chooseFirstServe(team, 'start')}
+                            >
+                                {teamLabel(team)}先攻
+                            </button>
+                        ))}
+                    </div>
+                    <div className="serve-buttons">
+                        <button className="serve-button random" onClick={() => chooseFirstServe('random', 'start')}>
+                            🎲 隨機決定
                         </button>
-                    )}
+                    </div>
                 </div>
             </>
         )
@@ -581,7 +532,7 @@ function Scoreboard() {
 
     // 頁面:結算畫面（比分直接使用後端判定的最終比分）
     let showWinPage;
-    if (!gameStarted && winner && !pickNext) {
+    if (loaded && !gameStarted && winner) {
         const textClass = (team) => (team === 'A' ? 'team-a-text' : 'team-b-text');
         const crownClass = (team) => (team === 'A' ? 'team-a-crown' : 'team-b-crown');
         showWinPage = (
@@ -602,15 +553,19 @@ function Scoreboard() {
                     </div>
 
                     <div className="serve-buttons">
-                        <button className="serve-button next-game" onClick={() => setPickNext(true)}>
+                        <button className="serve-button next-game" onClick={nextGame}>
                             再來一局
                         </button>
                     </div>
+                    <p className="next-game-hint">{teamLabel(winner)}（上一局的勝方）先攻，開局後可以更改</p>
                     {game.canUndo && (
                         <button className="plain-button" onClick={undoLastAction}>
                             ↩ 誤按？回復最後一分
                         </button>
                     )}
+                    <button className="plain-button" onClick={() => setShowRecords(true)}>
+                        查看紀錄
+                    </button>
                 </div>
             </>
         )
@@ -636,23 +591,19 @@ function Scoreboard() {
         );
     }
 
-    // 新局開始提示
+    // 先攻方提示
     const startBannerBox = startBanner && (
-        <div className="start-banner">先攻：{startBanner === 'A' ? '紅方' : '藍方'}</div>
+        <div className="start-banner">先攻：{teamLabel(startBanner)}</div>
     );
 
     // 渲染
     return (
         <div className={`app ${theme}`}>
 
-            {/* 上一頁頁面 */}
-            {previousPage}
-
+            {leavePage}
+            {recordsPage}
             {sharePage}
             {startBannerBox}
-
-            {/* 設定頁面 */}
-            {settingsPage}
 
             {/* 特效頁面:灑彩帶 */}
             {sprinkles}
@@ -660,8 +611,11 @@ function Scoreboard() {
             {/* 結算畫面 */}
             {showWinPage}
 
-            {/* 首次選擇先攻畫面 */}
+            {/* 尚未開局時的先攻選擇（備援） */}
             {firstSelectPage}
+
+            {/* 線上：等第一份房間狀態 */}
+            {!loaded && <div className="loading-overlay">連線中…</div>}
 
             {/* 上方按鈕 */}
             {topButton}
